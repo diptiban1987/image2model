@@ -1,0 +1,14 @@
+# ImageTo3D Pro - pinned for reproducibility
+bcrypt>=4.0,<5
+torch>=2.0,<3.0
+torchvision
+numpy>=1.24,<3
+pillow
+opencv-python
+open3d
+trimesh
+fastapi
+uvicorn[standard]
+pyside6>=6.5
+tqdm
+rembg

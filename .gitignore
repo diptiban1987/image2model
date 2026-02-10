@@ -1,0 +1,12 @@
+# Auth: password hash and session secret (server-side only)
+config/auth.json
+config/hitem3d_credentials.json
+.venv
+build.zip
+start_app.md
+build/
+dist/
+input/
+output/
+__pycache__/
+*.pyc

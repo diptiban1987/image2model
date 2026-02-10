@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: imageto3d-pro
+    env: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn ui.web.api:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: HITEM3D_ACCESS_TOKEN
+        sync: false
+      - key: HITEM3D_CLIENT_ID
+        sync: false
+      - key: HITEM3D_CLIENT_SECRET
+        sync: false

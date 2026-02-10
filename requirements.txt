@@ -13,3 +13,4 @@ pyside6>=6.5
 tqdm
 rembg
 psutil
+httpx

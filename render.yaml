@@ -4,7 +4,7 @@ services:
     env: python
     plan: starter
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn ui.web.api:app --host 0.0.0.0 --port $PORT
+    startCommand: gunicorn ui.web.api:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT
     envVars:
       - key: HITEM3D_ACCESS_TOKEN
         sync: false

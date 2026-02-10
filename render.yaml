@@ -2,7 +2,7 @@ services:
   - type: web
     name: imageto3d-pro
     env: python
-    plan: starter
+    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn ui.web.api:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT
     envVars:

@@ -22,7 +22,6 @@ OUTPUT_DIR = Path("output").resolve()
 SESSION_COOKIE = "imagetoad_session"
 SESSION_MAX_AGE = 24 * 3600
 
-
 def _get_session(request: Request) -> Optional[str]:
     return request.cookies.get(SESSION_COOKIE)
 

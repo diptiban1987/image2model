@@ -7,7 +7,6 @@ from pathlib import Path
 import asyncio
 import json
 
-from core.pipeline import run_pipeline as local_pipeline
 from core.hitem3d_api import Hitem3DAPI
 
 
@@ -110,6 +109,19 @@ def _run_local_pipeline(
         Dict with paths and stats
     """
     t0 = time.perf_counter()
+    try:
+        from core.pipeline import run_pipeline as local_pipeline
+    except Exception as exc:
+        return {
+            "error": f"Local processing failed to initialize: {exc}",
+            "obj": "",
+            "stl": "",
+            "glb": "",
+            "stats": {"total_seconds": 0, "stages": {"load_and_infer": 0, "cleanup": 0, "export": 0}},
+            "processing_method": "local",
+            "api_used": False,
+            "system_info": {},
+        }
 
     local_min_required = 6.0
     system_info: Dict[str, Any] = {}

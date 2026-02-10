@@ -12,3 +12,4 @@ uvicorn[standard]
 pyside6>=6.5
 tqdm
 rembg
++psutil

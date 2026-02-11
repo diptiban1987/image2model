@@ -142,8 +142,9 @@ def _run_local_pipeline(
         pre_warning = (
             f"Low available RAM detected for local processing ({system_info['ram_available_gb']}GB available). "
             f"TripoSR requires at least {local_min_required}GB RAM. "
-            "Processing will attempt to continue but may fall back to a basic mesh."
+            "Switching mesh quality to Draft for stability."
         )
+        quality = "draft"
 
     try:
         result = local_pipeline(
@@ -175,8 +176,14 @@ def _run_local_pipeline(
                     "Local processing fell back to a basic mesh because TripoSR failed. "
                     "Use Hitem3D API for better results."
                 )
+        texture_warning = "Local processing bakes a simple texture map from the input image (not full PBR materials). Use Hitem3D API for highest quality textures."
         if pre_warning and "warning" not in result:
             result["warning"] = pre_warning
+        if result.get("processing_method") == "local":
+            if "warning" in result and result["warning"]:
+                result["warning"] = f"{result['warning']} {texture_warning}"
+            else:
+                result["warning"] = texture_warning
         
         t1 = time.perf_counter()
         
@@ -355,6 +362,23 @@ async def validate_api_token(token: str) -> bool:
         return False
 
 
+async def get_hitem3d_balance(api_token: Optional[str]) -> Dict[str, Any]:
+    credentials = resolve_hitem3d_credentials(api_token)
+    if not (credentials["access_token"] or (credentials["client_id"] and credentials["client_secret"])):
+        return {"available": None, "error": "credentials_missing"}
+    api = Hitem3DAPI(
+        access_token=credentials["access_token"],
+        client_id=credentials["client_id"],
+        client_secret=credentials["client_secret"]
+    )
+    try:
+        result = await api.get_balance()
+    finally:
+        await api.close()
+    balance = result.get("balance")
+    return {"available": balance}
+
+
 def save_hitem3d_credentials(api_token: str) -> Dict[str, Optional[str]]:
     token_value = (api_token or "").strip()
     if not token_value:
@@ -372,7 +396,8 @@ def save_hitem3d_credentials(api_token: str) -> Dict[str, Optional[str]]:
         "client_id": client_id or "",
         "client_secret": client_secret or "",
     }
-    config_dir = Path("config")
+    base_dir = Path(__file__).resolve().parents[1]
+    config_dir = base_dir / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
     target = config_dir / "hitem3d_credentials.json"
     with open(target, "w", encoding="utf-8") as f:
@@ -396,9 +421,12 @@ def resolve_hitem3d_credentials(api_token: Optional[str]) -> Dict[str, Optional[
     access_token = os.getenv("HITEM3D_ACCESS_TOKEN") or os.getenv("HITEM3D_API_TOKEN")
     client_id = os.getenv("HITEM3D_CLIENT_ID")
     client_secret = os.getenv("HITEM3D_CLIENT_SECRET")
+    base_dir = Path(__file__).resolve().parents[1]
     try_files = [
+        base_dir / "config" / "hitem3d_credentials.json",
+        base_dir / "hitem3d_credentials.json",
         Path("config") / "hitem3d_credentials.json",
-        Path("hitem3d_credentials.json")
+        Path("hitem3d_credentials.json"),
     ]
     for p in try_files:
         if p.exists():

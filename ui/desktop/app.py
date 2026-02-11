@@ -40,7 +40,7 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from core.unified_pipeline import run_pipeline, get_available_models, validate_api_token, resolve_hitem3d_credentials, save_hitem3d_credentials
+from core.unified_pipeline import run_pipeline, get_available_models, validate_api_token, resolve_hitem3d_credentials, save_hitem3d_credentials, get_hitem3d_balance
 from core.auth import is_password_configured, verify_password, set_password
 
 APP_VERSION = "1.0.0"
@@ -314,6 +314,18 @@ class App(QWidget):
         self.selected_path: str | None = None
         self.outputs = {}
         self._preview_pix = QPixmap()
+        self.balance_available = None
+        self.balance_error = None
+        self.balance_timer = QTimer(self)
+        self.balance_timer.setSingleShot(True)
+        self.balance_timer.timeout.connect(self._fetch_balance)
+        self.credit_costs = {
+            "hitem3dv1.5": {"512": 15, "1024": 20, "1536": 50, "1536pro": 70},
+            "hitem3dv2.0": {"1536": 75, "1536pro": 90},
+            "scene-portraitv1.5": {"1536": 70},
+            "scene-portraitv2.0": {"1536pro": 70},
+            "scene-portraitv2.1": {"1536pro": 70},
+        }
 
         main = QVBoxLayout(self)
         main.setContentsMargins(12, 12, 12, 12)
@@ -481,6 +493,7 @@ class App(QWidget):
         self.api_token_edit.setPlaceholderText("Enter your Hitem3D API token")
         self.api_token_edit.textChanged.connect(self._validate_token)
         self.api_token_edit.textChanged.connect(self._update_run_enabled)
+        self.api_token_edit.textChanged.connect(self._schedule_balance_fetch)
         api_layout.addRow("API Token:", self.api_token_edit)
 
         save_token_btn = QPushButton("Save Server Token")
@@ -504,6 +517,7 @@ class App(QWidget):
         # Resolution selection
         self.api_resolution_combo = QComboBox()
         self._update_resolution_options()
+        self.api_resolution_combo.currentIndexChanged.connect(self._update_balance_info)
         api_layout.addRow("Resolution:", self.api_resolution_combo)
 
         self.api_format_combo = QComboBox()
@@ -518,6 +532,11 @@ class App(QWidget):
         self.api_format_combo.setCurrentIndex(1)
         api_layout.addRow("Output Format:", self.api_format_combo)
         api_layout.addRow(self.model_description_label)
+
+        self.balance_label = QLabel("Balance check not started.")
+        self.balance_label.setWordWrap(True)
+        self.balance_label.setStyleSheet("color: #666; font-size: 11px;")
+        api_layout.addRow("Balance:", self.balance_label)
         
         layout.addWidget(self.api_group)
         
@@ -759,11 +778,15 @@ class App(QWidget):
         self._refresh_token_placeholder()
         self._update_requirements_text()
         self._update_run_enabled()
+        self._update_balance_info()
+        if use_api:
+            self._schedule_balance_fetch()
 
     def _on_model_changed(self):
         """Handle model selection change."""
         self._update_resolution_options()
         self._update_model_description()
+        self._update_balance_info()
 
     def _update_resolution_options(self):
         """Update resolution dropdown based on selected model."""
@@ -796,6 +819,72 @@ class App(QWidget):
         
         self.model_description_label.setText(description)
 
+    def _format_credits(self, value):
+        if value is None:
+            return "--"
+        if isinstance(value, int) or (isinstance(value, float) and value.is_integer()):
+            return str(int(value))
+        if isinstance(value, (int, float)):
+            return f"{value:.2f}"
+        return "--"
+
+    def _get_required_credits(self):
+        model_key = self.api_model_combo.currentData()
+        resolution = self.api_resolution_combo.currentData()
+        if not model_key or not resolution:
+            return None
+        model_costs = self.credit_costs.get(model_key, {})
+        return model_costs.get(resolution)
+
+    def _update_balance_info(self):
+        if not self.api_radio.isChecked():
+            self.balance_label.setText("Balance check is available for Hitem3D API.")
+            return
+        required = self._get_required_credits()
+        if self.balance_error:
+            self.balance_label.setText(self.balance_error)
+            return
+        if self.balance_available is None:
+            if required is not None:
+                self.balance_label.setText(f"Balance unavailable. Requires {self._format_credits(required)} credits.")
+            else:
+                self.balance_label.setText("Balance unavailable.")
+            return
+        available_text = self._format_credits(self.balance_available)
+        if required is None:
+            self.balance_label.setText(f"Balance: {available_text} credits.")
+            return
+        if self.balance_available >= required:
+            self.balance_label.setText(f"Balance: {available_text} credits (needs {self._format_credits(required)}).")
+        else:
+            self.balance_label.setText(f"Insufficient balance: {available_text} credits (needs {self._format_credits(required)}).")
+
+    def _schedule_balance_fetch(self):
+        if not self.api_radio.isChecked():
+            return
+        self.balance_error = None
+        self.balance_timer.start(600)
+
+    def _fetch_balance(self):
+        if not self.api_radio.isChecked():
+            return
+        token = self.api_token_edit.text().strip()
+        credentials = resolve_hitem3d_credentials(token)
+        has_credentials = bool(credentials["access_token"] or (credentials["client_id"] and credentials["client_secret"]))
+        if not has_credentials:
+            self.balance_available = None
+            self.balance_error = "Add a valid API token to check balance."
+            self._update_balance_info()
+            return
+        try:
+            result = asyncio.run(get_hitem3d_balance(token or None))
+            self.balance_available = result.get("available")
+            self.balance_error = None
+        except Exception as exc:
+            self.balance_available = None
+            self.balance_error = f"Balance check failed: {exc}"
+        self._update_balance_info()
+
     def _validate_token(self):
         """Validate API token (basic check)."""
         token = self.api_token_edit.text().strip()
@@ -822,6 +911,7 @@ class App(QWidget):
             save_hitem3d_credentials(token)
             self._refresh_token_placeholder()
             QMessageBox.information(self, "Server Token", "Server API token saved.")
+            self._schedule_balance_fetch()
         except Exception as exc:
             QMessageBox.critical(self, "Server Token", f"Failed to save token: {exc}")
 
@@ -843,7 +933,7 @@ class App(QWidget):
         self.requirements_label.setText(
             "Cloud processing uses the Hitem3D API. Network stability improves completion time."
             if use_api
-            else "Local processing runs TripoSR on CPU. Keep at least 6GB RAM available for stable results."
+            else "Local processing runs TripoSR on CPU and bakes a simple texture map from the input image (not full PBR materials). Keep at least 6GB RAM available for stable results."
         )
 
     def _refresh_system_info(self):

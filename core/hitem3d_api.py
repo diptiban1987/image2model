@@ -324,6 +324,88 @@ class Hitem3DAPI:
                 results[kext] = out
 
         return results
+
+    def _extract_balance_value(self, payload: Any) -> Optional[float]:
+        if payload is None:
+            return None
+        if isinstance(payload, str):
+            cleaned = payload.strip().replace(",", "")
+            try:
+                return float(cleaned)
+            except Exception:
+                return None
+        if isinstance(payload, (int, float)):
+            return float(payload)
+        if isinstance(payload, list):
+            for item in payload:
+                value = self._extract_balance_value(item)
+                if value is not None:
+                    return value
+        if isinstance(payload, dict):
+            candidates = [
+                "balance",
+                "credit",
+                "credits",
+                "credit_balance",
+                "credit_remain",
+                "remaining",
+                "remain",
+                "available",
+                "total_available",
+                "left",
+                "amount",
+            ]
+            for key in candidates:
+                if key in payload:
+                    value = payload.get(key)
+                    parsed = self._extract_balance_value(value)
+                    if parsed is not None:
+                        return parsed
+            for key, value in payload.items():
+                key_lower = str(key).lower()
+                if "credit" in key_lower or "balance" in key_lower:
+                    if any(flag in key_lower for flag in ("remain", "remaining", "available", "left", "total")):
+                        parsed = self._extract_balance_value(value)
+                        if parsed is not None:
+                            return parsed
+            for key in ("data", "result", "info"):
+                value = self._extract_balance_value(payload.get(key))
+                if value is not None:
+                    return value
+        return None
+
+    async def get_balance(self) -> Dict[str, Any]:
+        endpoints = [
+            ("GET", "/open-api/v1/balance"),
+            ("GET", "/open-api/v1/account/balance"),
+            ("GET", "/open-api/v1/user/balance"),
+            ("GET", "/open-api/v1/credit/balance"),
+            ("GET", "/open-api/v1/credit/query"),
+            ("GET", "/open-api/v1/usage/balance"),
+            ("GET", "/open-api/v1/balance/query"),
+            ("GET", "/open-api/v1/account/info"),
+            ("GET", "/open-api/v1/user/info"),
+            ("POST", "/open-api/v1/credit/query"),
+            ("POST", "/open-api/v1/credit/balance"),
+        ]
+        for method, path in endpoints:
+            url = f"{self.base_url}{path}"
+            response = await self._request(method, url)
+            if response.status_code == 404:
+                continue
+            if response.status_code != 200:
+                continue
+            try:
+                result = response.json()
+            except Exception:
+                continue
+            payload = result
+            if isinstance(result, dict) and "data" in result:
+                payload = result.get("data")
+            balance = self._extract_balance_value(payload)
+            if balance is not None or result:
+                return {"balance": balance, "raw": result}
+        return {"balance": None, "raw": None}
     
     async def close(self):
         """Close the HTTP client."""

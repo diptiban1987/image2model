@@ -5,15 +5,19 @@ import os
 import re
 import platform
 import psutil
+import asyncio
+import time
+import uuid
 from pathlib import Path
-from typing import Optional
-from core.unified_pipeline import run_pipeline_async, get_available_models, validate_api_token, resolve_hitem3d_credentials, save_hitem3d_credentials
+from typing import Optional, Dict, Any
+from core.unified_pipeline import run_pipeline_async, get_available_models, validate_api_token, resolve_hitem3d_credentials, save_hitem3d_credentials, get_hitem3d_balance
 from core.hitem3d_api import InsufficientBalanceError
 from core.auth import (
     is_password_configured,
     verify_password,
     verify_session_token,
     create_session_token,
+    set_password,
 )
 
 app = FastAPI()
@@ -21,6 +25,19 @@ app = FastAPI()
 OUTPUT_DIR = Path("output").resolve()
 SESSION_COOKIE = "imagetoad_session"
 SESSION_MAX_AGE = 24 * 3600
+JOBS: Dict[str, Dict[str, Any]] = {}
+JOB_RETENTION_SECONDS = 6 * 3600
+
+
+def _prune_jobs():
+    now = time.time()
+    expired = [key for key, job in JOBS.items() if now - job.get("updated_at", now) > JOB_RETENTION_SECONDS]
+    for key in expired:
+        JOBS.pop(key, None)
+    if len(JOBS) > 200:
+        ordered = sorted(JOBS.items(), key=lambda item: item[1].get("updated_at", 0))
+        for key, _ in ordered[: len(JOBS) - 200]:
+            JOBS.pop(key, None)
 
 def _get_session(request: Request) -> Optional[str]:
     return request.cookies.get(SESSION_COOKIE)
@@ -29,7 +46,7 @@ def _get_session(request: Request) -> Optional[str]:
 async def require_session(request: Request) -> bool:
     """Dependency: require valid session when password is configured. Raises 401 otherwise."""
     if not is_password_configured():
-        return True
+        raise HTTPException(status_code=401, detail="Authentication required")
     token = _get_session(request)
     if verify_session_token(token or ""):
         return True
@@ -264,6 +281,30 @@ def _main_app_html():
                 font-size: 12px;
                 color: #a7f3d0;
             }
+            .balance-box {
+                margin-top: 8px;
+                padding: 8px 12px;
+                border-radius: 4px;
+                font-size: 12px;
+                border-left: 3px solid rgba(148,163,184,0.6);
+                background: rgba(30,41,59,0.6);
+                color: #cbd5f5;
+            }
+            .balance-ok {
+                border-left-color: #22c55e;
+                background: rgba(21,128,61,0.15);
+                color: #a7f3d0;
+            }
+            .balance-warn {
+                border-left-color: #f59e0b;
+                background: rgba(251, 191, 36, 0.12);
+                color: #fcd34d;
+            }
+            .balance-error {
+                border-left-color: #ef4444;
+                background: rgba(127, 29, 29, 0.2);
+                color: #fecdd3;
+            }
             .warning-box {
                 margin-top: 10px;
                 padding: 8px 12px;
@@ -451,6 +492,11 @@ def _main_app_html():
                             <option value="usdz">USDZ</option>
                         </select>
                     </div>
+                    
+                    <div class="option-group">
+                        <label class="option-label">Balance</label>
+                        <div class="balance-box" id="balanceInfo">Balance check not started.</div>
+                    </div>
                 </div>
             </div>
 
@@ -501,6 +547,7 @@ def _main_app_html():
             const saveServerToken = document.getElementById('saveServerToken');
             const apiResolution = document.getElementById('apiResolution');
             const apiFormat = document.getElementById('apiFormat');
+            const balanceInfo = document.getElementById('balanceInfo');
             const sysAvailable = document.getElementById('sysAvailable');
             const sysTotal = document.getElementById('sysTotal');
             const sysRequired = document.getElementById('sysRequired');
@@ -545,6 +592,15 @@ def _main_app_html():
                     resolutions: ['1536pro']
                 }
             };
+            const creditCosts = {
+                'hitem3dv1.5': { '512': 15, '1024': 20, '1536': 50, '1536pro': 70 },
+                'hitem3dv2.0': { '1536': 75, '1536pro': 90 },
+                'scene-portraitv1.5': { '1536': 70 },
+                'scene-portraitv2.0': { '1536pro': 70 },
+                'scene-portraitv2.1': { '1536pro': 70 }
+            };
+            let balanceState = { available: null, required: null, error: null, updatedAt: null };
+            let balanceFetchTimer = null;
 
             function setStatus(text) {
                 statusEl.textContent = text || '';
@@ -552,6 +608,105 @@ def _main_app_html():
 
             function updateApiTokenPlaceholder() {
                 apiToken.placeholder = serverHasCredentials ? 'Using server credentials (optional)' : 'Enter your Hitem3D API token';
+            }
+
+            function formatCredits(value) {
+                if (typeof value !== 'number' || Number.isNaN(value)) {
+                    return '--';
+                }
+                return Number.isInteger(value) ? String(value) : value.toFixed(2);
+            }
+
+            function getRequiredCredits() {
+                const modelCosts = creditCosts[apiModel.value];
+                if (!modelCosts) return null;
+                const value = modelCosts[apiResolution.value];
+                return typeof value === 'number' ? value : null;
+            }
+
+            function setBalanceBox(message, stateClass) {
+                balanceInfo.textContent = message || '';
+                balanceInfo.classList.remove('balance-ok', 'balance-warn', 'balance-error');
+                if (stateClass) {
+                    balanceInfo.classList.add(stateClass);
+                }
+            }
+
+            function updateBalanceInfo() {
+                const useApi = document.querySelector('input[name="processing"]:checked').value === 'api';
+                if (!useApi) {
+                    setBalanceBox('Balance check is available for Hitem3D API.', '');
+                    return;
+                }
+                const required = getRequiredCredits();
+                balanceState.required = required;
+                if (balanceState.error) {
+                    setBalanceBox(balanceState.error, 'balance-error');
+                    return;
+                }
+                if (balanceState.available === null || balanceState.available === undefined) {
+                    if (required !== null) {
+                        setBalanceBox(`Balance unavailable. Requires ${formatCredits(required)} credits.`, 'balance-warn');
+                    } else {
+                        setBalanceBox('Balance unavailable.', 'balance-warn');
+                    }
+                    return;
+                }
+                const availableText = formatCredits(balanceState.available);
+                if (required === null) {
+                    setBalanceBox(`Balance: ${availableText} credits.`, 'balance-ok');
+                    return;
+                }
+                if (balanceState.available >= required) {
+                    setBalanceBox(`Balance: ${availableText} credits (needs ${formatCredits(required)}).`, 'balance-ok');
+                } else {
+                    setBalanceBox(`Insufficient balance: ${availableText} credits (needs ${formatCredits(required)}).`, 'balance-error');
+                }
+            }
+
+            function scheduleBalanceFetch() {
+                if (balanceFetchTimer) {
+                    clearTimeout(balanceFetchTimer);
+                }
+                balanceFetchTimer = setTimeout(fetchBalance, 600);
+            }
+
+            async function fetchBalance() {
+                const useApi = document.querySelector('input[name="processing"]:checked').value === 'api';
+                if (!useApi) return;
+                const token = apiToken.value.trim();
+                if (!serverHasCredentials && !token) {
+                    balanceState.available = null;
+                    balanceState.error = 'Add a valid API token to check balance.';
+                    updateBalanceInfo();
+                    return;
+                }
+                balanceState.error = null;
+                setBalanceBox('Checking balance...', '');
+                try {
+                    const payload = new URLSearchParams();
+                    if (token) {
+                        payload.append('api_token', token);
+                    }
+                    const resp = await fetch('/hitem3d/balance', {
+                        method: 'POST',
+                        credentials: 'same-origin',
+                        body: payload
+                    });
+                    if (!resp.ok) {
+                        const error = await readResponseJson(resp);
+                        const detail = error && (error.detail || error.error || error.error_message);
+                        throw new Error(detail || `Server returned ${resp.status}`);
+                    }
+                    const data = await readResponseJson(resp) || {};
+                    balanceState.available = typeof data.available === 'number' ? data.available : null;
+                    balanceState.updatedAt = Date.now();
+                } catch (err) {
+                    const message = err && err.message ? err.message : 'Balance check failed.';
+                    balanceState.available = null;
+                    balanceState.error = `Balance check failed: ${message}`;
+                }
+                updateBalanceInfo();
             }
 
             function formatTime(totalSeconds) {
@@ -684,6 +839,70 @@ def _main_app_html():
                 resultsEl.innerHTML = lines.join('');
             }
 
+            async function readResponseJson(resp) {
+                const text = await resp.text();
+                if (!text) return null;
+                try {
+                    return JSON.parse(text);
+                } catch (e) {
+                    return { error_message: text };
+                }
+            }
+
+            function handleResult(data) {
+                const errorMsg = data.error_message || data.error || '';
+                if (errorMsg) {
+                    setStatus(`Error: ${errorMsg}`);
+                    if (!data.error_message) {
+                        data.error_message = errorMsg;
+                    }
+                    stopProgress(false);
+                } else {
+                    setStatus('Done! 3D files generated successfully.');
+                    stopProgress(true);
+                }
+                setResults(data);
+            }
+
+            function sleep(ms) {
+                return new Promise(resolve => setTimeout(resolve, ms));
+            }
+
+            async function pollJob(jobId, useApi) {
+                let attempts = 0;
+                while (true) {
+                    await sleep(3000);
+                    attempts += 1;
+                    const resp = await fetch(`/job/${jobId}`, {
+                        credentials: 'same-origin'
+                    });
+                    if (!resp.ok) {
+                        const error = await readResponseJson(resp);
+                        const detail = error && (error.detail || error.error || error.error_message);
+                        throw new Error(detail || `Server returned ${resp.status}`);
+                    }
+                    const data = await readResponseJson(resp) || {};
+                    const status = data.status;
+                    if (status === 'queued') {
+                        setStatus(useApi ? 'Queued for API processing...' : 'Queued for local processing...');
+                    } else if (status === 'running') {
+                        setStatus(useApi ? 'Processing via Hitem3D API...' : 'Processing locally...');
+                    } else if (status === 'done') {
+                        handleResult(data.result || {});
+                        return;
+                    } else if (status === 'error') {
+                        const msg = data.error_message || 'Processing failed';
+                        setStatus(`Error: ${msg}`);
+                        setResults({ error_message: msg });
+                        stopProgress(false);
+                        return;
+                    }
+                    if (attempts > 1200) {
+                        throw new Error('Processing timed out');
+                    }
+                }
+            }
+
             function showPreview(file) {
                 if (!file || !file.type.startsWith('image/')) {
                     previewContainer.style.display = 'none';
@@ -724,8 +943,12 @@ def _main_app_html():
                 sysMode.textContent = useApi ? 'API' : 'Local';
                 requirementsText.textContent = useApi
                     ? 'Cloud processing uses the Hitem3D API. Network stability improves completion time.'
-                    : 'Local processing runs TripoSR on CPU. Keep at least 6GB RAM available for stable results.';
+                    : 'Local processing runs TripoSR on CPU and bakes a simple texture map from the input image (not full PBR materials). Keep at least 6GB RAM available for stable results.';
                 updateModelInfo();
+                updateBalanceInfo();
+                if (useApi) {
+                    scheduleBalanceFetch();
+                }
             }
 
             function updateModelInfo() {
@@ -747,6 +970,7 @@ def _main_app_html():
                         apiResolution.appendChild(option);
                     });
                 }
+                updateBalanceInfo();
             }
 
             // Event listeners
@@ -777,6 +1001,7 @@ def _main_app_html():
                     serverApiToken.value = '';
                     updateApiTokenPlaceholder();
                     setStatus('Server API token saved.');
+                    scheduleBalanceFetch();
                 } catch (e) {
                     setStatus(`Error: ${e.message}`);
                 } finally {
@@ -785,8 +1010,12 @@ def _main_app_html():
             });
             
             apiModel.addEventListener('change', updateModelInfo);
-
-            dropzone.addEventListener('click', () => fileInput.click());
+            apiResolution.addEventListener('change', updateBalanceInfo);
+            apiToken.addEventListener('input', () => {
+                balanceState.error = null;
+                updateBalanceInfo();
+                scheduleBalanceFetch();
+            });
 
             fileInput.addEventListener('change', () => {
                 updateButtonLabel();
@@ -869,16 +1098,6 @@ def _main_app_html():
                 setStatus(preStatus);
                 startProgress(useApi);
 
-                async function readResponseJson(resp) {
-                    const text = await resp.text();
-                    if (!text) return null;
-                    try {
-                        return JSON.parse(text);
-                    } catch (e) {
-                        return { error_message: text };
-                    }
-                }
-
                 try {
                     const resp = await fetch('/generate', {
                         method: 'POST',
@@ -891,18 +1110,11 @@ def _main_app_html():
                         throw new Error(detail || `Server returned ${resp.status}`);
                     }
                     const data = await readResponseJson(resp) || {};
-                    const errorMsg = data.error_message || data.error || '';
-                    if (errorMsg) {
-                        setStatus(`Error: ${errorMsg}`);
-                        if (!data.error_message) {
-                            data.error_message = errorMsg;
-                        }
-                        stopProgress(false);
+                    if (data.job_id) {
+                        await pollJob(data.job_id, useApi);
                     } else {
-                        setStatus('Done! 3D files generated successfully.');
-                        stopProgress(true);
+                        handleResult(data);
                     }
-                    setResults(data);
                 } catch (err) {
                     console.error(err);
                     const msg = err && err.message ? err.message : 'Request failed';
@@ -954,7 +1166,9 @@ def _main_app_html():
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     """Serve main app; redirect to login when password is set and session invalid."""
-    if is_password_configured() and not verify_session_token(_get_session(request) or ""):
+    if not is_password_configured():
+        return RedirectResponse(url="/setup")
+    if not verify_session_token(_get_session(request) or ""):
         return RedirectResponse(url="/login")
     return _main_app_html()
 
@@ -1015,16 +1229,82 @@ LOGIN_HTML = """
 </html>
 """
 
+SETUP_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>Set Password — Image to 3D</title>
+    <style>
+        body { font-family: system-ui, sans-serif; background: #1e293b; color: #e5e7eb; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+        .card { background: rgba(15,23,42,0.95); border-radius: 16px; padding: 28px; max-width: 380px; width: 100%; border: 1px solid rgba(148,163,184,0.25); }
+        h1 { margin: 0 0 8px; font-size: 22px; }
+        input { width: 100%; padding: 10px 12px; margin: 8px 0; border: 1px solid #475569; border-radius: 8px; background: #0f172a; color: #e5e7eb; box-sizing: border-box; }
+        button { width: 100%; padding: 10px; margin-top: 12px; border: none; border-radius: 8px; background: #22c55e; color: white; font-weight: 600; cursor: pointer; }
+        button:hover { filter: brightness(1.05); }
+        .error { color: #f87171; font-size: 14px; margin-top: 8px; }
+        .note { color: #94a3b8; font-size: 13px; margin: 0 0 8px; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>Set Application Password</h1>
+        <p class="note">Create a password before anyone can use the app.</p>
+        <form method="post" action="/setup">
+            <input type="password" name="password" placeholder="New password" required />
+            <input type="password" name="confirm" placeholder="Confirm password" required />
+            <button type="submit">Save password</button>
+        </form>
+        <p id="err" class="error"></p>
+    </div>
+    <script>
+        const params = new URLSearchParams(location.search);
+        const err = params.get('error');
+        if (err === 'mismatch') document.getElementById('err').textContent = 'Passwords do not match.';
+        if (err === 'short') document.getElementById('err').textContent = 'Password must be at least 8 characters.';
+        if (err === 'failed') document.getElementById('err').textContent = 'Could not save password.';
+        if (err === 'configured') document.getElementById('err').textContent = 'Password already set. Please log in.';
+    </script>
+</body>
+</html>
+"""
+
+
+@app.get("/setup", response_class=HTMLResponse)
+async def setup_page():
+    if is_password_configured():
+        return RedirectResponse(url="/login")
+    return SETUP_HTML
+
+
+@app.post("/setup")
+async def setup_post(password: str = Form(...), confirm: str = Form(...)):
+    if is_password_configured():
+        return RedirectResponse(url="/setup?error=configured", status_code=302)
+    if password != confirm:
+        return RedirectResponse(url="/setup?error=mismatch", status_code=302)
+    if len(password) < 8:
+        return RedirectResponse(url="/setup?error=short", status_code=302)
+    try:
+        set_password(password)
+    except Exception:
+        return RedirectResponse(url="/setup?error=failed", status_code=302)
+    return RedirectResponse(url="/login", status_code=302)
+
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page():
     """Serve login form."""
+    if not is_password_configured():
+        return RedirectResponse(url="/setup")
     return LOGIN_HTML
 
 
 @app.post("/login")
 async def login_post(password: str = Form(...)):
     """Verify password (server-side bcrypt) and set session cookie."""
+    if not is_password_configured():
+        return RedirectResponse(url="/setup")
     if not verify_password(password):
         return RedirectResponse(url="/login?error=1", status_code=302)
     token = create_session_token()
@@ -1045,6 +1325,67 @@ async def logout():
     response = RedirectResponse(url="/login", status_code=302)
     response.delete_cookie(SESSION_COOKIE)
     return response
+
+
+async def _run_job(
+    job_id: str,
+    input_path: str,
+    safe_name: str,
+    use_api: bool,
+    api_token: Optional[str],
+    api_model: Optional[str],
+    api_resolution: Optional[str],
+    api_format: Optional[str],
+    quality: str,
+):
+    JOBS[job_id]["status"] = "running"
+    JOBS[job_id]["updated_at"] = time.time()
+    try:
+        result = await run_pipeline_async(
+            input_path,
+            name=safe_name,
+            use_api=use_api,
+            api_token=api_token,
+            api_model=api_model,
+            api_resolution=api_resolution,
+            api_format=api_format,
+            quality=quality if quality in ("draft", "standard", "high", "production") else "standard",
+        )
+        base = "/download"
+        for key in ("obj", "stl", "glb", "fbx", "usdz"):
+            path = result.get(key)
+            if path:
+                name = Path(path).name
+                result[f"{key}_url"] = f"{base}?path={name}" if name else None
+            else:
+                result[f"{key}_url"] = None
+        if result.get("error") and not result.get("error_message"):
+            result["error_message"] = result["error"]
+        JOBS[job_id].update(
+            {
+                "status": "done",
+                "result": result,
+                "updated_at": time.time(),
+            }
+        )
+    except InsufficientBalanceError as e:
+        JOBS[job_id].update({"status": "error", "error_message": str(e), "updated_at": time.time()})
+    except Exception as e:
+        JOBS[job_id].update({"status": "error", "error_message": str(e), "updated_at": time.time()})
+
+
+@app.get("/job/{job_id}")
+async def job_status(job_id: str, _auth: bool = Depends(require_session)):
+    job = JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    _prune_jobs()
+    payload = {"job_id": job_id, "status": job.get("status")}
+    if job.get("error_message"):
+        payload["error_message"] = job["error_message"]
+    if job.get("result"):
+        payload["result"] = job["result"]
+    return payload
 
 
 @app.post("/generate")
@@ -1100,36 +1441,27 @@ async def generate(
     with open(input_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
 
-    try:
-        result = await run_pipeline_async(
+    job_id = uuid.uuid4().hex
+    JOBS[job_id] = {
+        "status": "queued",
+        "created_at": time.time(),
+        "updated_at": time.time(),
+    }
+    _prune_jobs()
+    asyncio.create_task(
+        _run_job(
+            job_id,
             input_path,
-            name=safe_name,
-            use_api=use_api,
-            api_token=api_token,
-            api_model=api_model,
-            api_resolution=api_resolution,
-            api_format=api_format,
-            quality=quality if quality in ("draft", "standard", "high", "production") else "standard",
+            safe_name,
+            use_api,
+            api_token,
+            api_model,
+            api_resolution,
+            api_format,
+            quality,
         )
-
-        # Add download URLs for web UI (filename only for security)
-        base = "/download"
-        for key in ("obj", "stl", "glb", "fbx", "usdz"):
-            path = result.get(key)
-            if path:
-                name = Path(path).name
-                result[f"{key}_url"] = f"{base}?path={name}" if name else None
-            else:
-                result[f"{key}_url"] = None
-        if result.get("error") and not result.get("error_message"):
-            result["error_message"] = result["error"]
-
-        return result
-
-    except InsufficientBalanceError as e:
-        raise HTTPException(status_code=402, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    )
+    return {"job_id": job_id, "status": "queued"}
 
 
 @app.post("/credentials/update")
@@ -1141,6 +1473,14 @@ async def update_credentials(token: str = Form(...), _auth: bool = Depends(requi
         raise HTTPException(status_code=400, detail="Invalid Hitem3D API credentials")
     save_hitem3d_credentials(raw)
     return {"saved": True}
+
+
+@app.post("/hitem3d/balance")
+async def hitem3d_balance(api_token: Optional[str] = Form(None), _auth: bool = Depends(require_session)):
+    result = await get_hitem3d_balance(api_token.strip() if api_token else None)
+    if result.get("error") == "credentials_missing":
+        raise HTTPException(status_code=400, detail="Hitem3D credentials are required to check balance")
+    return {"available": result.get("available")}
 
 
 @app.get("/download")

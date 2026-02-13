@@ -21,7 +21,7 @@ def run_pipeline(
     output_dir: str = "output",
     quality: str = "standard",
     scale: float = 1.0,
-    **kwargs
+    **kwargs,
 ) -> dict:
     """
     Unified pipeline that supports both local processing and Hitem3D API.
@@ -43,17 +43,32 @@ def run_pipeline(
     """
     if use_api:
         credentials = resolve_hitem3d_credentials(api_token)
-        if not (credentials["access_token"] or (credentials["client_id"] and credentials["client_secret"])):
+        if not (
+            credentials["access_token"]
+            or (credentials["client_id"] and credentials["client_secret"])
+        ):
             raise ValueError("Hitem3D credentials are required when use_api=True")
-        return asyncio.run(_run_api_pipeline(
-            image_path, name, credentials, api_model, api_resolution, api_format, **kwargs
-        ))
+        return asyncio.run(
+            _run_api_pipeline(
+                image_path,
+                name,
+                credentials,
+                api_model,
+                api_resolution,
+                api_format,
+                **kwargs,
+            )
+        )
     else:
         return _run_local_pipeline(
-            image_path, name,
-            output_dir=output_dir, quality=quality, scale=scale,
-            **kwargs
+            image_path,
+            name,
+            output_dir=output_dir,
+            quality=quality,
+            scale=scale,
+            **kwargs,
         )
+
 
 async def run_pipeline_async(
     image_path: str,
@@ -66,23 +81,38 @@ async def run_pipeline_async(
     output_dir: str = "output",
     quality: str = "standard",
     scale: float = 1.0,
-    **kwargs
+    progress_callback=None,
+    **kwargs,
 ) -> dict:
     """
     Async-safe pipeline entrypoint for FastAPI.
     """
     if use_api:
         credentials = resolve_hitem3d_credentials(api_token)
-        if not (credentials["access_token"] or (credentials["client_id"] and credentials["client_secret"])):
+        if not (
+            credentials["access_token"]
+            or (credentials["client_id"] and credentials["client_secret"])
+        ):
             raise ValueError("Hitem3D credentials are required when use_api=True")
         return await _run_api_pipeline(
-            image_path, name, credentials, api_model, api_resolution, api_format, **kwargs
+            image_path,
+            name,
+            credentials,
+            api_model,
+            api_resolution,
+            api_format,
+            **kwargs,
         )
     else:
         return await asyncio.to_thread(
-            _run_local_pipeline, image_path, name,
-            output_dir=output_dir, quality=quality, scale=scale,
-            **kwargs
+            _run_local_pipeline,
+            image_path,
+            name,
+            output_dir=output_dir,
+            quality=quality,
+            scale=scale,
+            progress_callback=progress_callback,
+            **kwargs,
         )
 
 
@@ -92,7 +122,8 @@ def _run_local_pipeline(
     output_dir: str = "output",
     quality: str = "standard",
     scale: float = 1.0,
-    **kwargs
+    progress_callback=None,
+    **kwargs,
 ) -> dict:
     """
     Run the local processing pipeline with enhanced error handling.
@@ -114,31 +145,38 @@ def _run_local_pipeline(
     except Exception as exc:
         return {
             "error": f"Local processing failed to initialize: {exc}",
+            "error_message": f"Local processing failed to initialize: {exc}",
             "obj": "",
             "stl": "",
             "glb": "",
-            "stats": {"total_seconds": 0, "stages": {"load_and_infer": 0, "cleanup": 0, "export": 0}},
+            "stats": {
+                "total_seconds": 0,
+                "stages": {"load_and_infer": 0, "cleanup": 0, "export": 0},
+            },
             "processing_method": "local",
             "api_used": False,
             "system_info": {},
         }
 
-    local_min_required = 6.0
+    local_min_required = 4.0  # Raised from 2.5 — TripoSR realistically needs 4GB+
     system_info: Dict[str, Any] = {}
     try:
         mem = psutil.virtual_memory()
         system_info = {
             "platform": platform.platform(),
             "cpu_count": os.cpu_count(),
-            "ram_total_gb": round(mem.total / (1024 ** 3), 2),
-            "ram_available_gb": round(mem.available / (1024 ** 3), 2),
+            "ram_total_gb": round(mem.total / (1024**3), 2),
+            "ram_available_gb": round(mem.available / (1024**3), 2),
             "ram_required_gb": local_min_required,
         }
     except Exception:
         system_info = {}
 
     pre_warning = None
-    if system_info.get("ram_available_gb") is not None and system_info["ram_available_gb"] < local_min_required:
+    if (
+        system_info.get("ram_available_gb") is not None
+        and system_info["ram_available_gb"] < local_min_required
+    ):
         pre_warning = (
             f"Low available RAM detected for local processing ({system_info['ram_available_gb']}GB available). "
             f"TripoSR requires at least {local_min_required}GB RAM. "
@@ -148,63 +186,86 @@ def _run_local_pipeline(
 
     try:
         result = local_pipeline(
-            image_path, name,
+            image_path,
+            name,
             output_dir=output_dir,
             quality=quality,
             scale=scale,
-            **kwargs
+            progress_callback=progress_callback,
+            **kwargs,
         )
-        
-        fallback_info = result.get("fallback_info") if isinstance(result, dict) else None
-        if isinstance(fallback_info, dict) and fallback_info.get("fallback"):
-            reason = fallback_info.get("fallback_reason")
-            if reason == "low_memory":
-                available = fallback_info.get("available_gb")
-                detail = f" ({available}GB available)" if isinstance(available, (int, float)) else ""
-                result["warning"] = (
-                    "Local processing fell back to a basic mesh due to low available RAM"
-                    f"{detail}. TripoSR requires at least {local_min_required}GB RAM. "
-                    "Upgrade the PC RAM or use Hitem3D API for better results."
-                )
-            elif reason == "memory_error":
-                result["warning"] = (
-                    "Local processing fell back to a basic mesh because TripoSR ran out of memory. "
-                    "Upgrade the PC RAM or use Hitem3D API for better results."
-                )
-            else:
-                result["warning"] = (
-                    "Local processing fell back to a basic mesh because TripoSR failed. "
-                    "Use Hitem3D API for better results."
-                )
-        texture_warning = "Local processing bakes a simple texture map from the input image (not full PBR materials). Use Hitem3D API for highest quality textures."
-        if pre_warning and "warning" not in result:
-            result["warning"] = pre_warning
-        if result.get("processing_method") == "local":
-            if "warning" in result and result["warning"]:
-                result["warning"] = f"{result['warning']} {texture_warning}"
-            else:
-                result["warning"] = texture_warning
-        
-        t1 = time.perf_counter()
-        
-        # Add processing method info
+
+        # TripoSR no longer returns fallback sphere meshes — it raises
+        # TripoSRError instead.  So if we get here, we have a real mesh.
+
+        # Add processing method info (must come before warning logic)
         result["processing_method"] = "local"
         result["api_used"] = False
         if system_info:
             result["system_info"] = system_info
-        
+
+        texture_warning = (
+            "Local processing bakes a simple texture map from the input "
+            "image (not full PBR materials). Use Hitem3D API for highest "
+            "quality textures."
+        )
+        if pre_warning:
+            result["warning"] = pre_warning
+        if result.get("processing_method") == "local":
+            existing = result.get("warning", "")
+            if existing:
+                result["warning"] = f"{existing} {texture_warning}"
+            else:
+                result["warning"] = texture_warning
+
+        t1 = time.perf_counter()
+
         return result
-        
+
     except Exception as e:
+        # Import the custom error class (might not be available if init failed)
+        triposr_error = None
+        try:
+            from core.inference.triposr import TripoSRError
+            if isinstance(e, TripoSRError):
+                triposr_error = e
+        except ImportError:
+            pass
+
+        if triposr_error:
+            # Specific TripoSR failure — provide targeted guidance
+            reason = triposr_error.reason
+            if progress_callback:
+                try:
+                    progress_callback(
+                        "error", 0,
+                        f"TripoSR failed ({reason}): {str(triposr_error)[:120]}"
+                    )
+                except Exception:
+                    pass
+            error_msg = str(triposr_error)
+        else:
+            # Generic pipeline failure
+            if progress_callback:
+                try:
+                    progress_callback("error", 0, f"Processing failed: {str(e)[:120]}")
+                except Exception:
+                    pass
+            error_msg = f"Local processing failed: {str(e)}"
+
         return {
-            "error": f"Local processing failed: {str(e)}",
+            "error": error_msg,
+            "error_message": error_msg,
             "obj": "",
             "stl": "",
             "glb": "",
-            "stats": {"total_seconds": 0, "stages": {"load_and_infer": 0, "cleanup": 0, "export": 0}},
+            "stats": {
+                "total_seconds": round(time.perf_counter() - t0, 3),
+                "stages": {"load_and_infer": 0, "cleanup": 0, "export": 0},
+            },
             "processing_method": "local",
             "api_used": False,
-            "system_info": system_info
+            "system_info": system_info,
         }
 
 
@@ -215,11 +276,11 @@ async def _run_api_pipeline(
     api_model: str,
     api_resolution: str,
     api_format: str,
-    **kwargs
+    **kwargs,
 ) -> dict:
     """
     Run the Hitem3D API pipeline.
-    
+
     Args:
         image_path: Path to input image
         name: Base name for output files
@@ -227,28 +288,22 @@ async def _run_api_pipeline(
         api_model: Hitem3D model to use
         api_resolution: Output resolution
         **kwargs: Additional arguments for API
-        
+
     Returns:
         Dict with paths and stats
     """
     t0 = time.perf_counter()
-    
+
     # Initialize API client
     api = Hitem3DAPI(
         access_token=credentials["access_token"],
         client_id=credentials["client_id"],
-        client_secret=credentials["client_secret"]
+        client_secret=credentials["client_secret"],
     )
-    
+
     try:
         # Generate 3D model using API
-        format_map = {
-            "obj": 1,
-            "glb": 2,
-            "stl": 3,
-            "fbx": 4,
-            "usdz": 5
-        }
+        format_map = {"obj": 1, "glb": 2, "stl": 3, "fbx": 4, "usdz": 5}
         format_type = format_map.get((api_format or "").lower(), 2)
         result = await api.generate_3d_model(
             image_path=image_path,
@@ -257,11 +312,11 @@ async def _run_api_pipeline(
             model=api_model,
             resolution=api_resolution,
             format_type=format_type,
-            **kwargs
+            **kwargs,
         )
-        
+
         t1 = time.perf_counter()
-        
+
         # Add processing method info and stats
         result["processing_method"] = "hitem3d_api"
         result["api_used"] = True
@@ -270,13 +325,11 @@ async def _run_api_pipeline(
         result["api_format"] = api_format
         result["stats"] = {
             "total_seconds": round(t1 - t0, 3),
-            "stages": {
-                "api_processing": round(t1 - t0, 3)
-            }
+            "stages": {"api_processing": round(t1 - t0, 3)},
         }
-        
+
         return result
-        
+
     finally:
         await api.close()
 
@@ -284,7 +337,7 @@ async def _run_api_pipeline(
 def get_available_models() -> Dict[str, Dict[str, Any]]:
     """
     Get available models for both local and API processing.
-    
+
     Returns:
         Dict with model information
     """
@@ -295,9 +348,9 @@ def get_available_models() -> Dict[str, Dict[str, Any]]:
             "models": {
                 "default": {
                     "name": "Default Local Model",
-                    "description": "Standard local 3D generation model"
+                    "description": "Standard local 3D generation model",
                 }
-            }
+            },
         },
         "hitem3d": {
             "name": "Hitem3D API",
@@ -307,44 +360,44 @@ def get_available_models() -> Dict[str, Dict[str, Any]]:
                     "name": "HiTeM3D v1.5",
                     "description": "General purpose 3D generation model",
                     "resolutions": ["512", "1024", "1536", "1536pro"],
-                    "default_resolution": "1024"
+                    "default_resolution": "1024",
                 },
                 "hitem3dv2.0": {
                     "name": "HiTeM3D v2.0",
                     "description": "Enhanced 3D generation model",
                     "resolutions": ["1536", "1536pro"],
-                    "default_resolution": "1536"
+                    "default_resolution": "1536",
                 },
                 "scene-portraitv1.5": {
                     "name": "Scene Portrait v1.5",
                     "description": "Specialized portrait model",
                     "resolutions": ["1536"],
-                    "default_resolution": "1536"
+                    "default_resolution": "1536",
                 },
                 "scene-portraitv2.0": {
                     "name": "Scene Portrait v2.0",
                     "description": "Specialized portrait model",
                     "resolutions": ["1536pro"],
-                    "default_resolution": "1536pro"
+                    "default_resolution": "1536pro",
                 },
                 "scene-portraitv2.1": {
                     "name": "Scene Portrait v2.1",
                     "description": "Specialized portrait model",
                     "resolutions": ["1536pro"],
-                    "default_resolution": "1536pro"
-                }
-            }
-        }
+                    "default_resolution": "1536pro",
+                },
+            },
+        },
     }
 
 
 async def validate_api_token(token: str) -> bool:
     """
     Validate Hitem3D API token by making a test request.
-    
+
     Args:
         token: API access token to validate
-        
+
     Returns:
         True if token is valid, False otherwise
     """
@@ -353,7 +406,7 @@ async def validate_api_token(token: str) -> bool:
         api = Hitem3DAPI(
             access_token=credentials["access_token"],
             client_id=credentials["client_id"],
-            client_secret=credentials["client_secret"]
+            client_secret=credentials["client_secret"],
         )
         is_valid = await api.validate_access_token()
         await api.close()
@@ -364,12 +417,15 @@ async def validate_api_token(token: str) -> bool:
 
 async def get_hitem3d_balance(api_token: Optional[str]) -> Dict[str, Any]:
     credentials = resolve_hitem3d_credentials(api_token)
-    if not (credentials["access_token"] or (credentials["client_id"] and credentials["client_secret"])):
+    if not (
+        credentials["access_token"]
+        or (credentials["client_id"] and credentials["client_secret"])
+    ):
         return {"available": None, "error": "credentials_missing"}
     api = Hitem3DAPI(
         access_token=credentials["access_token"],
         client_id=credentials["client_id"],
-        client_secret=credentials["client_secret"]
+        client_secret=credentials["client_secret"],
     )
     try:
         result = await api.get_balance()
@@ -402,7 +458,11 @@ def save_hitem3d_credentials(api_token: str) -> Dict[str, Optional[str]]:
     target = config_dir / "hitem3d_credentials.json"
     with open(target, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
-    return {"access_token": access_token or None, "client_id": client_id, "client_secret": client_secret}
+    return {
+        "access_token": access_token or None,
+        "client_id": client_id,
+        "client_secret": client_secret,
+    }
 
 
 def resolve_hitem3d_credentials(api_token: Optional[str]) -> Dict[str, Optional[str]]:
@@ -416,7 +476,11 @@ def resolve_hitem3d_credentials(api_token: Optional[str]) -> Dict[str, Optional[
             if len(parts) == 2 and parts[0] and parts[1]:
                 client_id, client_secret = parts[0].strip(), parts[1].strip()
                 access_token = None
-        return {"access_token": access_token, "client_id": client_id, "client_secret": client_secret}
+        return {
+            "access_token": access_token,
+            "client_id": client_id,
+            "client_secret": client_secret,
+        }
 
     access_token = os.getenv("HITEM3D_ACCESS_TOKEN") or os.getenv("HITEM3D_API_TOKEN")
     client_id = os.getenv("HITEM3D_CLIENT_ID")
@@ -448,4 +512,8 @@ def resolve_hitem3d_credentials(api_token: Optional[str]) -> Dict[str, Optional[
             if len(parts) == 2 and parts[0] and parts[1]:
                 client_id, client_secret = parts[0].strip(), parts[1].strip()
                 access_token = None
-    return {"access_token": access_token, "client_id": client_id, "client_secret": client_secret}
+    return {
+        "access_token": access_token,
+        "client_id": client_id,
+        "client_secret": client_secret,
+    }

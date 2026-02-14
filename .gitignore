@@ -10,3 +10,5 @@ input/
 output/
 __pycache__/
 *.pyc
+
+nul

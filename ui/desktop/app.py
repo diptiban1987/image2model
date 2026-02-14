@@ -8,6 +8,7 @@ import shutil
 import urllib.request
 import urllib.error
 from urllib.parse import urlparse
+from typing import List
 import platform
 import psutil
 from PySide6.QtWidgets import (
@@ -40,8 +41,55 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from core.unified_pipeline import run_pipeline, get_available_models, validate_api_token, resolve_hitem3d_credentials, save_hitem3d_credentials, get_hitem3d_balance
+from core.unified_pipeline import (
+    run_pipeline,
+    get_available_models,
+    validate_api_token,
+    resolve_hitem3d_credentials,
+    save_hitem3d_credentials,
+    get_hitem3d_balance,
+)
 from core.auth import is_password_configured, verify_password, set_password
+from ui.desktop.multiangle_widget import MultiAngleWidget
+from core.multiangle_processor import run_multiangle_pipeline
+from ui.desktop.license_dialog import require_license_dialog
+
+
+APP_VERSION = "1.0.0"
+UPDATE_URL = os.getenv("IMAGETO3D_UPDATE_URL", "").strip()
+
+
+def require_license_then_login_then_show_app():
+    """
+    Full app startup flow:
+    1. Check license (REQUIRED - no license = no access)
+    2. Set password (first time)
+    3. Login with password
+    4. Show main app
+    """
+    app = QApplication.instance() or QApplication(sys.argv)
+
+    # STEP 1: LICENSE CHECK (GATEKEEPER)
+    # No license = App closes immediately
+    if not require_license_dialog():
+        return 1  # Exit code 1 = no license
+
+    # STEP 2: Password setup (first time only)
+    if not is_password_configured():
+        dlg = SetPasswordDialog()
+        if not dlg.exec():
+            return 1
+
+    # STEP 3: Login
+    dlg = LoginDialog()
+    if not dlg.exec():
+        return 0
+
+    # STEP 4: Show main app
+    w = App()
+    w.show()
+    return app.exec()
+
 
 APP_VERSION = "1.0.0"
 UPDATE_URL = os.getenv("IMAGETO3D_UPDATE_URL", "").strip()
@@ -91,23 +139,25 @@ def _safe_filename_from_url(url: str) -> str:
 
 def _launch_update_script(current_exe: str, new_exe: str) -> None:
     pid = os.getpid()
-    script = "\n".join([
-        "@echo off",
-        "setlocal",
-        f'set "EXE_PATH={current_exe}"',
-        f'set "NEW_EXE={new_exe}"',
-        f'set "PID={pid}"',
-        ":wait",
-        'tasklist /FI "PID eq %PID%" | find "%PID%" >nul',
-        "if %ERRORLEVEL%==0 (",
-        "  timeout /t 1 /nobreak >nul",
-        "  goto wait",
-        ")",
-        'move /Y "%NEW_EXE%" "%EXE_PATH%"',
-        'start "" "%EXE_PATH%"',
-        'del "%~f0"',
-        "endlocal",
-    ])
+    script = "\n".join(
+        [
+            "@echo off",
+            "setlocal",
+            f'set "EXE_PATH={current_exe}"',
+            f'set "NEW_EXE={new_exe}"',
+            f'set "PID={pid}"',
+            ":wait",
+            'tasklist /FI "PID eq %PID%" | find "%PID%" >nul',
+            "if %ERRORLEVEL%==0 (",
+            "  timeout /t 1 /nobreak >nul",
+            "  goto wait",
+            ")",
+            'move /Y "%NEW_EXE%" "%EXE_PATH%"',
+            'start "" "%EXE_PATH%"',
+            'del "%~f0"',
+            "endlocal",
+        ]
+    )
     fd, path = tempfile.mkstemp(suffix=".cmd")
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         handle.write(script)
@@ -160,7 +210,11 @@ class SetPasswordDialog(QDialog):
         self.setWindowTitle("Image → 3D Pro — Set Password")
         self.setMinimumWidth(320)
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Set an application password. It will be stored securely (hashed) on this machine."))
+        layout.addWidget(
+            QLabel(
+                "Set an application password. It will be stored securely (hashed) on this machine."
+            )
+        )
         layout.addWidget(QLabel("Password:"))
         self.password_edit = QLineEdit()
         self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
@@ -171,7 +225,9 @@ class SetPasswordDialog(QDialog):
         self.confirm_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.confirm_edit.setPlaceholderText("Confirm password")
         layout.addWidget(self.confirm_edit)
-        btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        btns = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
         btns.accepted.connect(self._on_ok)
         btns.rejected.connect(self.reject)
         layout.addWidget(btns)
@@ -183,14 +239,20 @@ class SetPasswordDialog(QDialog):
             QMessageBox.warning(self, "Set Password", "Please enter a password.")
             return
         if pwd != conf:
-            QMessageBox.warning(self, "Set Password", "Password and confirmation do not match.")
+            QMessageBox.warning(
+                self, "Set Password", "Password and confirmation do not match."
+            )
             return
         if len(pwd) < 8:
             QMessageBox.warning(self, "Set Password", "Use at least 8 characters.")
             return
         try:
             set_password(pwd)
-            QMessageBox.information(self, "Set Password", "Password set. You will need it to open the application.")
+            QMessageBox.information(
+                self,
+                "Set Password",
+                "Password set. You will need it to open the application.",
+            )
             self.accept()
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Could not save password: {e}")
@@ -254,6 +316,50 @@ class PipelineWorker(QThread):
             self.failed.emit(str(exc))
 
 
+class MultiAngleWorker(QThread):
+    finished = Signal(dict)
+    failed = Signal(str)
+    progress = Signal(int)
+
+    def __init__(
+        self,
+        image_paths: List[str],
+        use_api=False,
+        api_token=None,
+        api_model="hitem3dv1.5",
+        api_resolution="1024",
+        api_format="glb",
+        quality="standard",
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.image_paths = image_paths
+        self.use_api = use_api
+        self.api_token = api_token
+        self.api_model = api_model
+        self.api_resolution = api_resolution
+        self.api_format = api_format
+        self.quality = quality
+
+    def run(self):
+        try:
+            self.progress.emit(10)
+            result = run_multiangle_pipeline(
+                self.image_paths,
+                name="multiangle_model",
+                use_api=self.use_api,
+                api_token=self.api_token,
+                api_model=self.api_model,
+                api_resolution=self.api_resolution,
+                api_format=self.api_format,
+                quality=self.quality,
+            )
+            self.progress.emit(100)
+            self.finished.emit(result)
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
 class UpdateCheckWorker(QThread):
     finished = Signal(dict)
     failed = Signal(str)
@@ -270,7 +376,11 @@ class UpdateCheckWorker(QThread):
             download_url = str(info.get("url") or "").strip()
             notes = str(info.get("notes") or "").strip()
             result = {
-                "update_available": bool(latest and download_url and _is_newer_version(self.current_version, latest)),
+                "update_available": bool(
+                    latest
+                    and download_url
+                    and _is_newer_version(self.current_version, latest)
+                ),
                 "version": latest,
                 "url": download_url,
                 "notes": notes,
@@ -293,7 +403,9 @@ class UpdateDownloadWorker(QThread):
             temp_dir = tempfile.mkdtemp(prefix="imagetoad_update_")
             filename = _safe_filename_from_url(self.url)
             target = os.path.join(temp_dir, filename)
-            req = urllib.request.Request(self.url, headers={"User-Agent": "ImageTo3DPro"})
+            req = urllib.request.Request(
+                self.url, headers={"User-Agent": "ImageTo3DPro"}
+            )
             with urllib.request.urlopen(req, timeout=60) as resp:
                 with open(target, "wb") as handle:
                     shutil.copyfileobj(resp, handle)
@@ -450,15 +562,15 @@ class App(QWidget):
     def _build_processing_options(self):
         box = QGroupBox("Processing Options")
         layout = QVBoxLayout(box)
-        
+
         # Processing method selection
         method_layout = QHBoxLayout()
         method_layout.addWidget(QLabel("Method:"))
-        
+
         self.local_radio = QRadioButton("Local Processing")
         self.api_radio = QRadioButton("Hitem3D API")
         self.local_radio.setChecked(True)
-        
+
         self.local_radio.toggled.connect(self._on_method_changed)
         self.api_radio.toggled.connect(self._on_method_changed)
 
@@ -487,7 +599,7 @@ class App(QWidget):
         self.api_group = QGroupBox("API Options")
         self.api_group.setVisible(False)
         api_layout = QFormLayout(self.api_group)
-        
+
         # API Token
         self.api_token_edit = QLineEdit()
         self.api_token_edit.setPlaceholderText("Enter your Hitem3D API token")
@@ -499,7 +611,7 @@ class App(QWidget):
         save_token_btn = QPushButton("Save Server Token")
         save_token_btn.clicked.connect(self._save_server_token)
         api_layout.addRow("", save_token_btn)
-        
+
         # Model selection
         self.api_model_combo = QComboBox()
         model_info = get_available_models()
@@ -508,12 +620,12 @@ class App(QWidget):
             self.api_model_combo.addItem(model_data["name"], model_key)
         self.api_model_combo.currentIndexChanged.connect(self._on_model_changed)
         api_layout.addRow("Model:", self.api_model_combo)
-        
+
         # Model description (create before _update_resolution_options so _update_model_description can set it)
         self.model_description_label = QLabel()
         self.model_description_label.setWordWrap(True)
         self.model_description_label.setStyleSheet("color: #666; font-size: 11px;")
-        
+
         # Resolution selection
         self.api_resolution_combo = QComboBox()
         self._update_resolution_options()
@@ -537,9 +649,9 @@ class App(QWidget):
         self.balance_label.setWordWrap(True)
         self.balance_label.setStyleSheet("color: #666; font-size: 11px;")
         api_layout.addRow("Balance:", self.balance_label)
-        
+
         layout.addWidget(self.api_group)
-        
+
         return box
 
     def _build_actions(self):
@@ -572,7 +684,10 @@ class App(QWidget):
     # ---- Actions -----------------------------------------------------
     def pick_file(self):
         file, _ = QFileDialog.getOpenFileName(
-            self, "Select Image", "", "Images (*.png *.jpg *.jpeg *.bmp *.webp);;All Files (*)"
+            self,
+            "Select Image",
+            "",
+            "Images (*.png *.jpg *.jpeg *.bmp *.webp);;All Files (*)",
         )
         if not file:
             return
@@ -582,35 +697,97 @@ class App(QWidget):
         self._log(f"Selected: {file}")
         self._update_run_enabled()
 
+    def _on_multiangle_toggled(self, checked):
+        """Handle multi-angle toggle"""
+        self.multiangle_mode = checked
+        if checked:
+            # Disable single image input
+            self.path_edit.setEnabled(False)
+            self.selected_path = None
+            self._log("Multi-angle mode enabled - use drag & drop below")
+        else:
+            self.path_edit.setEnabled(True)
+        self._update_run_enabled()
+
+    def _on_multiangle_files_selected(self, paths):
+        """Handle multi-angle file selection"""
+        self.multiangle_paths = paths
+        self._update_run_enabled()
+        self._log(f"Multi-angle: {len(paths)} images selected")
+
     def start_pipeline(self):
+        # Check if multi-angle mode is active
+        if hasattr(self, "multiangle_mode") and self.multiangle_mode:
+            if not hasattr(self, "multiangle_paths") or len(self.multiangle_paths) < 3:
+                QMessageBox.warning(
+                    self,
+                    "Multi-Angle",
+                    "Please select 3-5 images for multi-angle processing",
+                )
+                return
+
+            # Start multi-angle pipeline
+            self._set_running(True)
+            self.status_label.setText("Running Multi-Angle Processing...")
+            self.progress.setValue(0)
+            self._log(
+                f"Starting multi-angle pipeline with {len(self.multiangle_paths)} images"
+            )
+
+            self.worker = MultiAngleWorker(
+                self.multiangle_paths,
+                use_api=False,  # Multi-angle uses local processing
+                quality=self.quality_combo.currentData(),
+                parent=self,
+            )
+            self.worker.progress.connect(self.progress.setValue)
+            self.worker.finished.connect(self._on_finished)
+            self.worker.failed.connect(self._on_failed)
+            self.worker.start()
+            return
+
+        # Original single-image pipeline code follows...
         if not self.selected_path:
-            QMessageBox.information(self, "Select an image", "Please choose an image first.")
+            QMessageBox.information(
+                self, "Select an image", "Please choose an image first."
+            )
             return
 
         # Get processing options
         options = self._get_processing_options()
-        
+
         # Validate API options if using API
         if options["use_api"]:
             credentials = resolve_hitem3d_credentials(options["api_token"])
-            has_credentials = bool(credentials["access_token"] or (credentials["client_id"] and credentials["client_secret"]))
+            has_credentials = bool(
+                credentials["access_token"]
+                or (credentials["client_id"] and credentials["client_secret"])
+            )
             if not has_credentials:
-                QMessageBox.warning(self, "Credentials Required", "Please add Hitem3D credentials or API token.")
+                QMessageBox.warning(
+                    self,
+                    "Credentials Required",
+                    "Please add Hitem3D credentials or API token.",
+                )
                 return
             if options["api_token"]:
                 is_valid = asyncio.run(validate_api_token(options["api_token"]))
                 if not is_valid:
-                    QMessageBox.warning(self, "Invalid Credentials", "Please enter valid Hitem3D credentials.")
+                    QMessageBox.warning(
+                        self,
+                        "Invalid Credentials",
+                        "Please enter valid Hitem3D credentials.",
+                    )
                     return
         else:
             try:
-                available_gb = psutil.virtual_memory().available / (1024 ** 3)
-                if available_gb < 6:
+                available_gb = psutil.virtual_memory().available / (1024**3)
+                if available_gb < 2.5:
                     QMessageBox.warning(
                         self,
                         "Low RAM",
-                        "Local processing requires at least 6GB available RAM. "
-                        "Please upgrade your PC RAM or use Hitem3D API."
+                        "Local processing requires at least 2.5GB available RAM. "
+                        "Please close other applications or use Hitem3D API.",
                     )
                     return
             except Exception:
@@ -664,7 +841,9 @@ class App(QWidget):
             api_model = outputs.get("api_model", "unknown")
             api_resolution = outputs.get("api_resolution", "unknown")
             api_format = outputs.get("api_format", "unknown")
-            self._log(f"API Model: {api_model}, Resolution: {api_resolution}, Format: {api_format}")
+            self._log(
+                f"API Model: {api_model}, Resolution: {api_resolution}, Format: {api_format}"
+            )
 
         stats = outputs.get("stats") or {}
         total = stats.get("total_seconds")
@@ -674,7 +853,11 @@ class App(QWidget):
         if stages:
             for name, secs in stages.items():
                 self._log(f"  {name}: {secs:.3f}s")
-        files = {k: outputs.get(k) for k in ("obj", "stl", "glb", "fbx", "usdz") if outputs.get(k)}
+        files = {
+            k: outputs.get(k)
+            for k in ("obj", "stl", "glb", "fbx", "usdz")
+            if outputs.get(k)
+        }
         self._log(f"Done. Files: {files}")
         system_info = outputs.get("system_info") or {}
         if system_info:
@@ -713,7 +896,9 @@ class App(QWidget):
     def open_output(self, key: str):
         path = self.outputs.get(key)
         if not path or not os.path.exists(path):
-            QMessageBox.information(self, "Not available", f"No {key.upper()} file yet.")
+            QMessageBox.information(
+                self, "Not available", f"No {key.upper()} file yet."
+            )
             return
         QDesktopServices.openUrl(QUrl.fromLocalFile(os.path.abspath(path)))
 
@@ -733,12 +918,15 @@ class App(QWidget):
         if not has_image:
             self.run_btn.setEnabled(False)
             return
-            
+
         # If using API, check token
         if self.api_radio.isChecked():
             token = self.api_token_edit.text().strip()
             credentials = resolve_hitem3d_credentials(token)
-            has_credentials = bool(credentials["access_token"] or (credentials["client_id"] and credentials["client_secret"]))
+            has_credentials = bool(
+                credentials["access_token"]
+                or (credentials["client_id"] and credentials["client_secret"])
+            )
             has_valid_token = bool(token) and len(token) >= 10
             self.run_btn.setEnabled(has_valid_token or has_credentials)
         else:
@@ -768,7 +956,11 @@ class App(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if hasattr(self, "_preview_pix") and self._preview_pix and not self._preview_pix.isNull():
+        if (
+            hasattr(self, "_preview_pix")
+            and self._preview_pix
+            and not self._preview_pix.isNull()
+        ):
             self._update_preview_pixmap()
 
     def _on_method_changed(self):
@@ -793,17 +985,17 @@ class App(QWidget):
         model_key = self.api_model_combo.currentData()
         if not model_key:
             return
-            
+
         model_info = get_available_models()
         hitem3d_models = model_info.get("hitem3d", {}).get("models", {})
         model_data = hitem3d_models.get(model_key, {})
         resolutions = model_data.get("resolutions", ["1024"])
-        
+
         self.api_resolution_combo.clear()
         for res in resolutions:
             display_text = f"{res}³" if res != "1536pro" else "1536³ Pro"
             self.api_resolution_combo.addItem(display_text, res)
-        
+
         self._update_model_description()
 
     def _update_model_description(self):
@@ -811,12 +1003,12 @@ class App(QWidget):
         model_key = self.api_model_combo.currentData()
         if not model_key:
             return
-            
+
         model_info = get_available_models()
         hitem3d_models = model_info.get("hitem3d", {}).get("models", {})
         model_data = hitem3d_models.get(model_key, {})
         description = model_data.get("description", "")
-        
+
         self.model_description_label.setText(description)
 
     def _format_credits(self, value):
@@ -846,7 +1038,9 @@ class App(QWidget):
             return
         if self.balance_available is None:
             if required is not None:
-                self.balance_label.setText(f"Balance unavailable. Requires {self._format_credits(required)} credits.")
+                self.balance_label.setText(
+                    f"Balance unavailable. Requires {self._format_credits(required)} credits."
+                )
             else:
                 self.balance_label.setText("Balance unavailable.")
             return
@@ -855,9 +1049,13 @@ class App(QWidget):
             self.balance_label.setText(f"Balance: {available_text} credits.")
             return
         if self.balance_available >= required:
-            self.balance_label.setText(f"Balance: {available_text} credits (needs {self._format_credits(required)}).")
+            self.balance_label.setText(
+                f"Balance: {available_text} credits (needs {self._format_credits(required)})."
+            )
         else:
-            self.balance_label.setText(f"Insufficient balance: {available_text} credits (needs {self._format_credits(required)}).")
+            self.balance_label.setText(
+                f"Insufficient balance: {available_text} credits (needs {self._format_credits(required)})."
+            )
 
     def _schedule_balance_fetch(self):
         if not self.api_radio.isChecked():
@@ -870,7 +1068,10 @@ class App(QWidget):
             return
         token = self.api_token_edit.text().strip()
         credentials = resolve_hitem3d_credentials(token)
-        has_credentials = bool(credentials["access_token"] or (credentials["client_id"] and credentials["client_secret"]))
+        has_credentials = bool(
+            credentials["access_token"]
+            or (credentials["client_id"] and credentials["client_secret"])
+        )
         if not has_credentials:
             self.balance_available = None
             self.balance_error = "Add a valid API token to check balance."
@@ -889,7 +1090,10 @@ class App(QWidget):
         """Validate API token (basic check)."""
         token = self.api_token_edit.text().strip()
         credentials = resolve_hitem3d_credentials(token)
-        has_credentials = bool(credentials["access_token"] or (credentials["client_id"] and credentials["client_secret"]))
+        has_credentials = bool(
+            credentials["access_token"]
+            or (credentials["client_id"] and credentials["client_secret"])
+        )
         if not token and has_credentials:
             self.api_token_edit.setStyleSheet("")
             return
@@ -901,11 +1105,15 @@ class App(QWidget):
     def _save_server_token(self):
         token = self.api_token_edit.text().strip()
         if not token:
-            QMessageBox.information(self, "Server Token", "Please enter the API token first.")
+            QMessageBox.information(
+                self, "Server Token", "Please enter the API token first."
+            )
             return
         is_valid = asyncio.run(validate_api_token(token))
         if not is_valid:
-            QMessageBox.warning(self, "Invalid Credentials", "Please enter valid Hitem3D credentials.")
+            QMessageBox.warning(
+                self, "Invalid Credentials", "Please enter valid Hitem3D credentials."
+            )
             return
         try:
             save_hitem3d_credentials(token)
@@ -933,15 +1141,17 @@ class App(QWidget):
         self.requirements_label.setText(
             "Cloud processing uses the Hitem3D API. Network stability improves completion time."
             if use_api
-            else "Local processing runs TripoSR on CPU and bakes a simple texture map from the input image (not full PBR materials). Keep at least 6GB RAM available for stable results."
+            else "Local processing runs TripoSR on CPU (5-15 min). Requires 2.5GB+ RAM. Close other apps for best results."
         )
 
     def _refresh_system_info(self):
-        required = 6.0
+        required = 2.5
         try:
             mem = psutil.virtual_memory()
-            self.sys_available_value.setText(f"{round(mem.available / (1024 ** 3), 2)} GB")
-            self.sys_total_value.setText(f"{round(mem.total / (1024 ** 3), 2)} GB")
+            self.sys_available_value.setText(
+                f"{round(mem.available / (1024**3), 2)} GB"
+            )
+            self.sys_total_value.setText(f"{round(mem.total / (1024**3), 2)} GB")
             self.sys_required_value.setText(f"{required} GB")
             self.sys_cpu_value.setText(str(os.cpu_count() or "--"))
             self.sys_platform_value.setText(platform.platform())
@@ -968,9 +1178,14 @@ class App(QWidget):
     def _refresh_token_placeholder(self):
         token = self.api_token_edit.text().strip()
         credentials = resolve_hitem3d_credentials(token)
-        has_credentials = bool(credentials["access_token"] or (credentials["client_id"] and credentials["client_secret"]))
+        has_credentials = bool(
+            credentials["access_token"]
+            or (credentials["client_id"] and credentials["client_secret"])
+        )
         if has_credentials and not token:
-            self.api_token_edit.setPlaceholderText("Using server credentials (optional)")
+            self.api_token_edit.setPlaceholderText(
+                "Using server credentials (optional)"
+            )
         else:
             self.api_token_edit.setPlaceholderText("Enter your Hitem3D API token")
 
@@ -1006,7 +1221,9 @@ class App(QWidget):
         if not url:
             return
         if not _is_frozen():
-            QMessageBox.information(self, "Update", "Update is available for the packaged .exe build only.")
+            QMessageBox.information(
+                self, "Update", "Update is available for the packaged .exe build only."
+            )
             return
         self.status_label.setText("Downloading update…")
         self.download_worker = UpdateDownloadWorker(url, parent=self)
@@ -1027,6 +1244,14 @@ class App(QWidget):
 
 
 def main():
+    app = QApplication.instance() or QApplication(sys.argv)
+
+    # Load professional styling
+    style_file = os.path.join(os.path.dirname(__file__), "styles.qss")
+    if os.path.exists(style_file):
+        with open(style_file, "r") as f:
+            app.setStyleSheet(f.read())
+
     exit_code = require_login_then_show_app()
     sys.exit(exit_code if exit_code is not None else 0)
 

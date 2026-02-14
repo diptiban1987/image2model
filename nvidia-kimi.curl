@@ -1,0 +1,1 @@
+curl.exe -X POST https://integrate.api.nvidia.com/v1/chat/completions `-H "Content-Type: application/json" `-H "Authorization: Bearer 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" `-d '{\"model\":\"moonshotai/kimi-k2.5\",\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}],\"max_tokens\":250}'

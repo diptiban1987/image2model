@@ -1,14 +1,39 @@
 services:
   - type: web
     name: imageto3d-pro
-    env: python
+    runtime: python
+    region: oregon
     plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn ui.web.api:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT
+
+    # Build: install CPU-only PyTorch first (saves ~1GB vs GPU version)
+    buildCommand: |
+      pip install --upgrade pip
+      pip install torch --index-url https://download.pytorch.org/whl/cpu
+      pip install -r requirements.txt
+
+    # Start: single worker for free tier (512MB RAM limit), 120s timeout for model generation
+    startCommand: gunicorn ui.web.api:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --workers 1 --timeout 120
+
+    # Health check
+    healthCheckPath: /
+
     envVars:
+      # Hitem3D API credentials
       - key: HITEM3D_ACCESS_TOKEN
         sync: false
       - key: HITEM3D_CLIENT_ID
         sync: false
       - key: HITEM3D_CLIENT_SECRET
         sync: false
+      # Session security (auto-generated)
+      - key: IMAGETO3D_SECRET_KEY
+        generateValue: true
+      # Payment provider
+      - key: GUMROAD_ACCESS_TOKEN
+        sync: false
+      # Python version
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      # Port (Render sets this)
+      - key: PORT
+        value: "10000"

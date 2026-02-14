@@ -1,0 +1,4 @@
+{"timestamp": "2026-02-12T16:28:55.375064Z", "level": "INFO", "logger": "test", "message": "Test logging works!", "module": "logger", "function": "_log", "line": 116}
+{"timestamp": "2026-02-12T16:30:33.545488Z", "level": "INFO", "logger": "test", "message": "Test logging works!", "module": "logger", "function": "_log", "line": 116}
+{"timestamp": "2026-02-12T19:22:13.974652Z", "level": "INFO", "logger": "core.license_manager", "message": "Trial generation used. Remaining: 0", "module": "logger", "function": "_log", "line": 116}
+{"timestamp": "2026-02-12T19:51:39.879227Z", "level": "INFO", "logger": "core.license_manager", "message": "Trial generation used. Remaining: 0", "module": "logger", "function": "_log", "line": 116}

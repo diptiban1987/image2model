@@ -28,6 +28,7 @@ logger = get_logger(__name__)
 @dataclass
 class LicenseData:
     """License data structure for local storage."""
+
     key: str
     user_id: str
     plan_id: str
@@ -43,6 +44,7 @@ class LicenseData:
 @dataclass
 class TrialData:
     """Trial data structure for tracking free generations."""
+
     generations_used: int = 0
     generations_remaining: int = 1  # Default to 1 free generation
     first_used_at: Optional[str] = None
@@ -53,14 +55,14 @@ class TrialData:
 class LicenseManager:
     """
     Manages license validation and trial tracking.
-    
+
     Allows ONE free generation before requiring license.
     """
-    
+
     LICENSE_FILE = Path("config/license.json")
     TRIAL_FILE = Path("config/trial.json")
     OFFLINE_GRACE_DAYS = 7
-    
+
     def __init__(self):
         self._current_license: Optional[LicenseData] = None
         self._trial_data: Optional[TrialData] = None
@@ -68,11 +70,11 @@ class LicenseManager:
         self._ensure_dirs()
         self._load_license()
         self._load_trial()
-    
+
     def _ensure_dirs(self):
         """Ensure directories exist."""
         self.LICENSE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    
+
     def _generate_hardware_fingerprint(self) -> str:
         """Generate unique hardware fingerprint."""
         system_info = {
@@ -85,15 +87,15 @@ class LicenseManager:
         info_string = json.dumps(system_info, sort_keys=True)
         fingerprint = hashlib.sha256(info_string.encode()).hexdigest()[:32]
         return fingerprint
-    
+
     def _get_system_uuid(self) -> str:
         """Get system UUID."""
         try:
             if platform.system() == "Windows":
                 import subprocess
+
                 result = subprocess.run(
-                    ["wmic", "csproduct", "get", "uuid"],
-                    capture_output=True, text=True
+                    ["wmic", "csproduct", "get", "uuid"], capture_output=True, text=True
                 )
                 return result.stdout.strip().split("\n")[-1].strip()
             else:
@@ -103,7 +105,7 @@ class LicenseManager:
                 return str(uuid.getnode())
         except Exception:
             return str(uuid.uuid4())
-    
+
     def _load_license(self):
         """Load license from storage."""
         if not self.LICENSE_FILE.exists():
@@ -113,18 +115,18 @@ class LicenseManager:
             self._current_license = LicenseData(**data)
         except Exception as e:
             logger.error(f"Failed to load license: {e}")
-    
+
     def _load_trial(self):
         """Load trial data from storage."""
         if not self.TRIAL_FILE.exists():
             # Initialize trial data
             self._trial_data = TrialData(
                 generations_remaining=payment_settings.trial_generations,
-                hardware_fingerprint=self._hardware_fp
+                hardware_fingerprint=self._hardware_fp,
             )
             self._save_trial()
             return
-        
+
         try:
             data = json.loads(self.TRIAL_FILE.read_text())
             self._trial_data = TrialData(**data)
@@ -132,9 +134,9 @@ class LicenseManager:
             logger.error(f"Failed to load trial: {e}")
             self._trial_data = TrialData(
                 generations_remaining=payment_settings.trial_generations,
-                hardware_fingerprint=self._hardware_fp
+                hardware_fingerprint=self._hardware_fp,
             )
-    
+
     def _save_license(self):
         """Save license to storage."""
         if self._current_license:
@@ -144,7 +146,7 @@ class LicenseManager:
                 )
             except Exception as e:
                 logger.error(f"Failed to save license: {e}")
-    
+
     def _save_trial(self):
         """Save trial data to storage."""
         if self._trial_data:
@@ -154,98 +156,110 @@ class LicenseManager:
                 )
             except Exception as e:
                 logger.error(f"Failed to save trial: {e}")
-    
+
     # ═════════════════════════════════════════════════════════════════
     # TRIAL METHODS
     # ═════════════════════════════════════════════════════════════════
-    
+
     def has_trial_available(self) -> bool:
         """Check if user has free trial generations available."""
         if not self._trial_data:
             return False
-        
+
         # Check hardware fingerprint (prevent sharing trial)
         if self._trial_data.hardware_fingerprint != self._hardware_fp:
             logger.warning("Trial hardware mismatch")
             return False
-        
+
         return self._trial_data.generations_remaining > 0
-    
+
     def get_trial_remaining(self) -> int:
         """Get number of remaining trial generations."""
         if not self._trial_data:
             return 0
         return max(0, self._trial_data.generations_remaining)
-    
+
     def use_trial_generation(self) -> bool:
         """
         Use one trial generation.
-        
+
         Returns True if successful, False if no trials remaining.
         """
         if not self.has_trial_available():
             return False
-        
+
         now = datetime.utcnow().isoformat()
-        
+
         if self._trial_data.generations_used == 0:
             self._trial_data.first_used_at = now
-        
+
         self._trial_data.generations_used += 1
         self._trial_data.generations_remaining -= 1
         self._trial_data.last_used_at = now
-        
+
         self._save_trial()
-        
+
         logger.info(
             f"Trial generation used. Remaining: {self._trial_data.generations_remaining}"
         )
         return True
-    
+
     def reset_trial(self):
         """Reset trial data (for testing)."""
         self._trial_data = TrialData(
             generations_remaining=payment_settings.trial_generations,
-            hardware_fingerprint=self._hardware_fp
+            hardware_fingerprint=self._hardware_fp,
         )
         self._save_trial()
-    
+
     # ═════════════════════════════════════════════════════════════════
     # LICENSE METHODS
     # ═════════════════════════════════════════════════════════════════
-    
+
     def has_valid_license(self) -> bool:
         """Check if user has valid license."""
         if not self._current_license:
             return False
-        
+
         if not self._current_license.is_active:
             return False
-        
+
         expires_at = datetime.fromisoformat(self._current_license.expires_at)
         if datetime.utcnow() > expires_at:
             return False
-        
+
+        # Admin licenses (I3D-ADMIN-*) bypass hardware fingerprint check
+        is_admin_license = self._current_license.key.startswith("I3D-ADMIN-")
+        if is_admin_license:
+            logger.info(f"Admin license detected: {self._current_license.key[:20]}...")
+            return True
+
+        # Check hardware fingerprint for non-admin licenses
         if self._current_license.hardware_fingerprint != self._hardware_fp:
+            # Check if within grace period
             if self._current_license.offline_grace_period_end:
-                grace_end = datetime.fromisoformat(self._current_license.offline_grace_period_end)
+                grace_end = datetime.fromisoformat(
+                    self._current_license.offline_grace_period_end
+                )
                 if datetime.utcnow() < grace_end:
+                    logger.info(f"License valid within grace period until {grace_end}")
                     return True
+            logger.warning("Hardware fingerprint mismatch and grace period expired")
             return False
-        
+
         return True
-    
+
     async def validate_license_online(self, license_key: str) -> Dict[str, Any]:
         """Validate license online."""
         from core.payment_factory import PaymentProcessor
-        
+
         try:
             payment = PaymentProcessor()
             license_obj = await payment.validate_license(license_key)
-            
+
             if not license_obj:
                 return {"valid": False, "message": "Invalid license key"}
-            
+
             return {
                 "valid": True,
                 "license": license_obj,
@@ -254,53 +268,64 @@ class LicenseManager:
         except Exception as e:
             logger.error(f"Online validation failed: {e}")
             return {"valid": False, "message": f"Validation error: {str(e)}"}
-    
+
     def activate_license(self, license_key: str, license_obj) -> bool:
         """Activate license on this machine."""
         try:
-            grace_period_end = datetime.utcnow() + timedelta(days=self.OFFLINE_GRACE_DAYS)
-            
+            # Admin licenses get longer grace periods
+            is_admin = license_key.startswith("I3D-ADMIN-")
+            grace_days = 365 if is_admin else self.OFFLINE_GRACE_DAYS
+            grace_period_end = datetime.utcnow() + timedelta(days=grace_days)
+
+            # Admin licenses get 10-year expiration (effectively lifetime)
+            if is_admin:
+                expires_at = datetime.utcnow() + timedelta(days=3650)
+            elif license_obj.expires_at:
+                expires_at = license_obj.expires_at
+            else:
+                expires_at = datetime.utcnow() + timedelta(days=30)
+
             self._current_license = LicenseData(
                 key=license_key,
                 user_id=license_obj.user_id,
                 plan_id=license_obj.plan_id,
                 credits=license_obj.credits,
                 created_at=datetime.utcnow().isoformat(),
-                expires_at=license_obj.expires_at.isoformat() if license_obj.expires_at else (datetime.utcnow() + timedelta(days=30)).isoformat(),
+                expires_at=expires_at.isoformat(),
                 hardware_fingerprint=self._hardware_fp,
                 is_active=True,
                 last_validated=datetime.utcnow().isoformat(),
                 offline_grace_period_end=grace_period_end.isoformat(),
             )
-            
+
             self._save_license()
-            logger.info(f"License activated: {license_key[:8]}...")
+            logger.info(f"License activated: {license_key[:8]}... (Admin: {is_admin})")
             return True
         except Exception as e:
             logger.error(f"Failed to activate license: {e}")
             return False
-    
+
     def deactivate_license(self):
         """Deactivate current license."""
         if self._current_license:
             self._current_license.is_active = False
             self._save_license()
-    
+
     def remove_license(self):
         """Remove license completely."""
         if self.LICENSE_FILE.exists():
             self.LICENSE_FILE.unlink()
         self._current_license = None
-    
+
     def get_license_info(self) -> Optional[Dict]:
         """Get license information."""
         if not self._current_license:
             return None
-        
+
         license_data = self._current_license
         expires_at = datetime.fromisoformat(license_data.expires_at)
         days_remaining = (expires_at - datetime.utcnow()).days
-        
+
         return {
             "key": license_data.key[:8] + "...",
             "plan_id": license_data.plan_id,
@@ -309,42 +334,42 @@ class LicenseManager:
             "days_remaining": days_remaining,
             "is_active": license_data.is_active,
         }
-    
+
     def deduct_credits(self, amount: int) -> bool:
         """Deduct credits from license."""
         if not self._current_license:
             return False
-        
+
         if self._current_license.credits < amount:
             return False
-        
+
         self._current_license.credits -= amount
         self._save_license()
         return True
-    
+
     def get_credits(self) -> int:
         """Get remaining credits."""
         if not self._current_license:
             return 0
         return self._current_license.credits
-    
+
     def can_use_app(self) -> bool:
         """
         Check if user can use the app (either has trial or license).
-        
+
         This is the main check before allowing any generation.
         """
         return self.has_trial_available() or self.has_valid_license()
-    
+
     def require_license_or_trial(self) -> bool:
         """
         Enforce license or trial requirement.
-        
+
         Returns True if can proceed, raises exception otherwise.
         """
         if self.can_use_app():
             return True
-        
+
         raise LicenseRequiredError(
             "You have used your free trial. Please purchase a license to continue."
         )
@@ -352,6 +377,7 @@ class LicenseManager:
 
 class LicenseRequiredError(Exception):
     """Exception raised when license is required but not present."""
+
     pass
 
 

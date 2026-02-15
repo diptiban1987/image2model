@@ -6,6 +6,7 @@ from typing import Dict, Any, Optional
 from pathlib import Path
 import asyncio
 import json
+from datetime import datetime
 
 from core.hitem3d_api import Hitem3DAPI
 
@@ -24,14 +25,14 @@ def run_pipeline(
     **kwargs,
 ) -> dict:
     """
-    Unified pipeline that supports both local processing and Hitem3D API.
+    Unified pipeline that supports both local processing and Cloud API.
 
     Args:
         image_path: Path to input image
         name: Base name for output files
-        use_api: Whether to use Hitem3D API (True) or local processing (False)
-        api_token: Hitem3D API access token (required if use_api=True)
-        api_model: Hitem3D model to use (hitem3dv1.5, hitem3dv2.0, etc.)
+        use_api: Whether to use Cloud API (True) or local processing (False)
+        api_token: Cloud API access token (required if use_api=True)
+        api_model: Cloud model to use (standard, high_quality, etc.)
         api_resolution: Output resolution for API (512, 1024, 1536, 1536pro)
         output_dir: Output directory for local pipeline (default "output")
         quality: Local mesh quality: "draft", "standard", "high", "production"
@@ -47,7 +48,7 @@ def run_pipeline(
             credentials["access_token"]
             or (credentials["client_id"] and credentials["client_secret"])
         ):
-            raise ValueError("Hitem3D credentials are required when use_api=True")
+            raise ValueError("Cloud API credentials are required when use_api=True")
         return asyncio.run(
             _run_api_pipeline(
                 image_path,
@@ -93,7 +94,7 @@ async def run_pipeline_async(
             credentials["access_token"]
             or (credentials["client_id"] and credentials["client_secret"])
         ):
-            raise ValueError("Hitem3D credentials are required when use_api=True")
+            raise ValueError("Cloud API credentials are required when use_api=True")
         return await _run_api_pipeline(
             image_path,
             name,
@@ -206,7 +207,7 @@ def _run_local_pipeline(
 
         texture_warning = (
             "Local processing bakes a simple texture map from the input "
-            "image (not full PBR materials). Use Hitem3D API for highest "
+            "image (not full PBR materials). Use Cloud API for highest "
             "quality textures."
         )
         if pre_warning:
@@ -227,6 +228,7 @@ def _run_local_pipeline(
         triposr_error = None
         try:
             from core.inference.triposr import TripoSRError
+
             if isinstance(e, TripoSRError):
                 triposr_error = e
         except ImportError:
@@ -238,8 +240,9 @@ def _run_local_pipeline(
             if progress_callback:
                 try:
                     progress_callback(
-                        "error", 0,
-                        f"TripoSR failed ({reason}): {str(triposr_error)[:120]}"
+                        "error",
+                        0,
+                        f"TripoSR failed ({reason}): {str(triposr_error)[:120]}",
                     )
                 except Exception:
                     pass
@@ -279,13 +282,13 @@ async def _run_api_pipeline(
     **kwargs,
 ) -> dict:
     """
-    Run the Hitem3D API pipeline.
+    Run the Cloud API pipeline.
 
     Args:
         image_path: Path to input image
         name: Base name for output files
-        api_token: Hitem3D API access token
-        api_model: Hitem3D model to use
+        api_token: Cloud API access token
+        api_model: Cloud model to use
         api_resolution: Output resolution
         **kwargs: Additional arguments for API
 
@@ -334,13 +337,29 @@ async def _run_api_pipeline(
         await api.close()
 
 
-def get_available_models() -> Dict[str, Dict[str, Any]]:
+def get_available_models(api_token: Optional[str] = None) -> Dict[str, Dict[str, Any]]:
     """
     Get available models for both local and API processing.
+    Dynamically returns models based on detected platform (Tripo3D or Hitem3D).
+
+    Args:
+        api_token: Optional API token to detect platform type
 
     Returns:
         Dict with model information
     """
+    from core.platform_features import get_available_models as get_platform_models
+
+    # Detect platform type from token
+    platform_type = "hitem3d"  # Default
+    if api_token:
+        if ":" in api_token:
+            platform_type = "hitem3d"
+        else:
+            platform_type = "tripo3d"
+
+    platform_models = get_platform_models(platform_type)
+
     return {
         "local": {
             "name": "Local Processing",
@@ -352,48 +371,50 @@ def get_available_models() -> Dict[str, Dict[str, Any]]:
                 }
             },
         },
-        "hitem3d": {
-            "name": "Hitem3D API",
-            "description": "Cloud-based 3D generation service",
-            "models": {
-                "hitem3dv1.5": {
-                    "name": "HiTeM3D v1.5",
-                    "description": "General purpose 3D generation model",
-                    "resolutions": ["512", "1024", "1536", "1536pro"],
-                    "default_resolution": "1024",
-                },
-                "hitem3dv2.0": {
-                    "name": "HiTeM3D v2.0",
-                    "description": "Enhanced 3D generation model",
-                    "resolutions": ["1536", "1536pro"],
-                    "default_resolution": "1536",
-                },
-                "scene-portraitv1.5": {
-                    "name": "Scene Portrait v1.5",
-                    "description": "Specialized portrait model",
-                    "resolutions": ["1536"],
-                    "default_resolution": "1536",
-                },
-                "scene-portraitv2.0": {
-                    "name": "Scene Portrait v2.0",
-                    "description": "Specialized portrait model",
-                    "resolutions": ["1536pro"],
-                    "default_resolution": "1536pro",
-                },
-                "scene-portraitv2.1": {
-                    "name": "Scene Portrait v2.1",
-                    "description": "Specialized portrait model",
-                    "resolutions": ["1536pro"],
-                    "default_resolution": "1536pro",
-                },
+        "api": platform_models.get(
+            "api",
+            {
+                "name": "Cloud API",
+                "description": "Cloud-based 3D generation service",
+                "models": {},
             },
-        },
+        ),
+        "features": platform_models.get("features", {}),
+        "generation_modes": platform_models.get("generation_modes", []),
     }
+
+
+def detect_platform_type(api_token: Optional[str] = None) -> str:
+    """
+    Detect which platform type the API token belongs to.
+
+    Args:
+        api_token: API token or credentials string
+
+    Returns:
+        'tripo3d', 'hitem3d', or 'unknown'
+    """
+    if not api_token:
+        return "unknown"
+
+    # Tripo3D keys start with 'tsk_' and don't contain colons
+    if api_token.startswith("tsk_") and ":" not in api_token:
+        return "tripo3d"
+
+    # Hitem3D uses client_id:secret format
+    if ":" in api_token:
+        return "hitem3d"
+
+    # Default assumption for long keys without colons
+    if len(api_token) > 30 and ":" not in api_token:
+        return "tripo3d"
+
+    return "hitem3d"
 
 
 async def validate_api_token(token: str) -> bool:
     """
-    Validate Hitem3D API token by making a test request.
+    Validate Cloud API token by making a test request.
 
     Args:
         token: API access token to validate
@@ -435,37 +456,74 @@ async def get_hitem3d_balance(api_token: Optional[str]) -> Dict[str, Any]:
     return {"available": balance}
 
 
-def save_hitem3d_credentials(api_token: str) -> Dict[str, Optional[str]]:
+def save_api_credentials(api_token: str) -> Dict[str, Optional[str]]:
+    """
+    Save API credentials for either Tripo3D or Hitem3D.
+
+    Args:
+        api_token: API token - can be:
+            - Tripo3D: single API key (e.g., "tsk_...")
+            - Hitem3D: "access_key:secret_key" format
+
+    Returns:
+        Dictionary with credential information
+    """
     token_value = (api_token or "").strip()
     if not token_value:
         raise ValueError("API token is required")
+
+    # Detect platform type
+    platform_type = "tripo3d"
     access_token = token_value
     client_id = None
     client_secret = None
+
     if ":" in access_token:
+        # Hitem3D format: access_key:secret_key
         parts = access_token.split(":", 1)
         if len(parts) == 2 and parts[0] and parts[1]:
             client_id, client_secret = parts[0].strip(), parts[1].strip()
-            access_token = ""
+            access_token = None
+            platform_type = "hitem3d"
+    elif access_token.startswith("tsk_"):
+        # Tripo3D format
+        platform_type = "tripo3d"
+
+    # Save to unified credentials file
     data = {
-        "access_token": access_token,
+        "platform": platform_type,
+        "access_token": access_token or "",
         "client_id": client_id or "",
         "client_secret": client_secret or "",
+        "saved_at": datetime.utcnow().isoformat(),
     }
+
     base_dir = Path(__file__).resolve().parents[1]
     config_dir = base_dir / "config"
     config_dir.mkdir(parents=True, exist_ok=True)
-    target = config_dir / "hitem3d_credentials.json"
+    target = config_dir / "api_credentials.json"
+
     with open(target, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
+
+    print(f"[Credentials] Saved {platform_type} credentials to {target}")
+
     return {
-        "access_token": access_token or None,
+        "platform": platform_type,
+        "access_token": access_token,
         "client_id": client_id,
         "client_secret": client_secret,
     }
 
 
+# Keep old function name for backward compatibility
+def save_hitem3d_credentials(api_token: str) -> Dict[str, Optional[str]]:
+    """Backward compatibility - redirects to unified save function."""
+    return save_api_credentials(api_token)
+
+
 def resolve_hitem3d_credentials(api_token: Optional[str]) -> Dict[str, Optional[str]]:
+    """Resolve API credentials from various sources."""
     token_value = (api_token or "").strip()
     if token_value:
         access_token = token_value
@@ -482,38 +540,107 @@ def resolve_hitem3d_credentials(api_token: Optional[str]) -> Dict[str, Optional[
             "client_secret": client_secret,
         }
 
-    access_token = os.getenv("HITEM3D_ACCESS_TOKEN") or os.getenv("HITEM3D_API_TOKEN")
+    access_token = (
+        os.getenv("HITEM3D_ACCESS_TOKEN")
+        or os.getenv("HITEM3D_API_TOKEN")
+        or os.getenv("TRIPO_API_KEY")
+    )
     client_id = os.getenv("HITEM3D_CLIENT_ID")
     client_secret = os.getenv("HITEM3D_CLIENT_SECRET")
+
     base_dir = Path(__file__).resolve().parents[1]
-    try_files = [
-        base_dir / "config" / "hitem3d_credentials.json",
-        base_dir / "hitem3d_credentials.json",
-        Path("config") / "hitem3d_credentials.json",
-        Path("hitem3d_credentials.json"),
-    ]
-    for p in try_files:
-        if p.exists():
-            try:
-                with open(p, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                file_access_token = data.get("access_token") or data.get("token")
-                file_client_id = data.get("client_id")
-                file_client_secret = data.get("client_secret")
-                access_token = access_token or file_access_token
-                client_id = client_id or file_client_id
-                client_secret = client_secret or file_client_secret
-                break
-            except Exception:
-                pass
+
+    # First check new unified credentials file
+    unified_file = base_dir / "config" / "api_credentials.json"
+    if unified_file.exists():
+        try:
+            with open(unified_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            file_access_token = data.get("access_token") or data.get("token")
+            file_client_id = data.get("client_id")
+            file_client_secret = data.get("client_secret")
+
+            access_token = access_token or file_access_token
+            client_id = client_id or file_client_id
+            client_secret = client_secret or file_client_secret
+        except Exception:
+            pass
+
+    # Fallback to old credential files
+    if not access_token and not client_id:
+        try_files = [
+            base_dir / "config" / "hitem3d_credentials.json",
+            base_dir / "hitem3d_credentials.json",
+            Path("config") / "hitem3d_credentials.json",
+            Path("hitem3d_credentials.json"),
+        ]
+        for p in try_files:
+            if p.exists():
+                try:
+                    with open(p, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    file_access_token = data.get("access_token") or data.get("token")
+                    file_client_id = data.get("client_id")
+                    file_client_secret = data.get("client_secret")
+                    access_token = access_token or file_access_token
+                    client_id = client_id or file_client_id
+                    client_secret = client_secret or file_client_secret
+                    break
+                except Exception:
+                    pass
+
+    # Parse combined token if needed
     if access_token and not (client_id or client_secret):
         if ":" in access_token:
             parts = access_token.split(":", 1)
             if len(parts) == 2 and parts[0] and parts[1]:
                 client_id, client_secret = parts[0].strip(), parts[1].strip()
                 access_token = None
+
     return {
         "access_token": access_token,
         "client_id": client_id,
         "client_secret": client_secret,
     }
+
+
+def load_saved_api_credentials() -> Optional[Dict[str, Any]]:
+    """
+    Load saved API credentials for display in UI.
+
+    Returns:
+        Dictionary with token string and platform type, or None if no credentials saved
+    """
+    base_dir = Path(__file__).resolve().parents[1]
+    creds_file = base_dir / "config" / "api_credentials.json"
+
+    if not creds_file.exists():
+        return None
+
+    try:
+        with open(creds_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        platform = data.get("platform", "unknown")
+
+        # Reconstruct token string based on platform
+        if platform == "hitem3d":
+            client_id = data.get("client_id", "")
+            client_secret = data.get("client_secret", "")
+            if client_id and client_secret:
+                return {
+                    "token": f"{client_id}:{client_secret}",
+                    "platform": platform,
+                }
+        else:
+            access_token = data.get("access_token", "")
+            if access_token:
+                return {
+                    "token": access_token,
+                    "platform": platform,
+                }
+
+        return None
+    except Exception as e:
+        print(f"[Credentials] Failed to load saved credentials: {e}")
+        return None

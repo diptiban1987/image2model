@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="512" height="128" viewBox="0 0 512 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bgGradientWide" x1="0" y1="0" x2="512" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#667eea"/>
+      <stop offset="100%" stop-color="#764ba2"/>
+    </linearGradient>
+    <linearGradient id="cubeGradient" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#f093fb"/>
+      <stop offset="100%" stop-color="#f5576c"/>
+    </linearGradient>
+    <linearGradient id="imageGradient" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#4facfe"/>
+      <stop offset="100%" stop-color="#00f2fe"/>
+    </linearGradient>
+    <filter id="shadow" x="0" y="0" width="512" height="128">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+  
+  <!-- Background -->
+  <rect x="0" y="0" width="512" height="128" rx="16" fill="url(#bgGradientWide)" filter="url(#shadow)"/>
+  
+  <!-- Icon -->
+  <g transform="translate(32, 16) scale(0.75)">
+    <!-- 3D Cube -->
+    <polygon points="64,24 96,44 96,84 64,104 32,84 32,44" fill="url(#cubeGradient)" opacity="0.9"/>
+    <polygon points="64,24 96,44 64,54 32,44" fill="url(#cubeGradient)" opacity="0.6"/>
+    <polygon points="96,44 96,84 64,104 64,54" fill="url(#cubeGradient)" opacity="0.7"/>
+    
+    <!-- Image Icon Overlay -->
+    <rect x="44" y="54" width="40" height="30" rx="4" fill="white" opacity="0.95"/>
+    <rect x="48" y="58" width="32" height="22" rx="2" fill="url(#imageGradient)"/>
+    <circle cx="55" cy="66" r="4" fill="white" opacity="0.8"/>
+    <polygon points="50,76 60,70 70,76 80,68 80,76 50,76" fill="white" opacity="0.6"/>
+  </g>
+  
+  <!-- Text -->
+  <text x="140" y="56" font-family="Arial, sans-serif" font-size="36" font-weight="bold" fill="white">ImageTo3D</text>
+  <text x="142" y="84" font-family="Arial, sans-serif" font-size="18" fill="white" opacity="0.8">Pro</text>
+  <text x="180" y="84" font-family="Arial, sans-serif" font-size="14" fill="white" opacity="0.6">— Transform Images into 3D Models</text>
+</svg>

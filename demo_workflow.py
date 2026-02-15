@@ -14,12 +14,14 @@ if str(ROOT) not in sys.path:
 
 from core.license_manager import get_license_manager
 
+
 def print_box(text, width=60):
     """Print text in a box"""
-    print('=' * width)
-    for line in text.split('\n'):
-        print(f'  {line:<{width-4}}')
-    print('=' * width)
+    print("=" * width)
+    for line in text.split("\n"):
+        print(f"  {line:<{width - 4}}")
+    print("=" * width)
+
 
 def show_trial_dialog():
     """Show the trial offer dialog"""
@@ -52,6 +54,7 @@ def show_trial_dialog():
 ╚══════════════════════════════════════════════════════════════╝
     """)
 
+
 def show_license_dialog():
     """Show the license required dialog"""
     print("""
@@ -77,6 +80,7 @@ def show_license_dialog():
 ╚══════════════════════════════════════════════════════════════╝
     """)
 
+
 def show_main_app():
     """Show the main app interface"""
     print("""
@@ -91,7 +95,7 @@ def show_main_app():
 ║                                                              ║
 ║  Processing Options                                          ║
 ║  ┌──────────────────────────────────────────────────────┐   ║
-║  │  Method: (*) Local Processing    ( ) Hitem3D API     │   ║
+║  │  Method: (*) Local Processing    ( ) Cloud API     │   ║
 ║  │  Mesh quality: [Standard ▼]                          │   ║
 ║  └──────────────────────────────────────────────────────┘   ║
 ║                                                              ║
@@ -113,45 +117,46 @@ def show_main_app():
 ╚══════════════════════════════════════════════════════════════╝
     """)
 
+
 def simulate_workflow():
     """Simulate the complete user workflow"""
     lm = get_license_manager()
-    
-    print("\n" + "="*60)
+
+    print("\n" + "=" * 60)
     print("  📱 ImageTo3D Pro - Workflow Demonstration")
-    print("="*60)
+    print("=" * 60)
     print()
-    
+
     # Check trial status
     print("CHECKING TRIAL STATUS...")
     print(f"  Trial available: {lm.has_trial_available()}")
     print(f"  Trial remaining: {lm.get_trial_remaining()}")
     print()
-    
+
     input("Press ENTER to start the workflow demonstration...")
     print()
-    
+
     # Step 1: Show trial dialog
     print("📱 STEP 1: First Launch - Trial Offer Dialog")
     print("-" * 60)
     show_trial_dialog()
     input("Press ENTER to click 'Start Free Trial'...")
     print()
-    
+
     # Step 2: Activate trial
     print("👤 USER ACTION: Clicking 'Start Free Trial'...")
     if lm.use_trial_generation():
         print("✅ Trial activated successfully!")
         print(f"   Remaining: {lm.get_trial_remaining()}")
     print()
-    
+
     # Step 3: Show main app
     print("📱 STEP 2: Main App Interface Opens")
     print("-" * 60)
     show_main_app()
     input("Press ENTER to generate a 3D model...")
     print()
-    
+
     # Step 4: Generate model
     print("📱 STEP 3: User Generates 3D Model")
     print("-" * 60)
@@ -161,21 +166,21 @@ def simulate_workflow():
     print("✅ Generation complete! 3D model saved to output/")
     print("   Files created: model.obj, model.glb, model.stl")
     print()
-    
+
     # Step 5: Check trial consumed
     print("📱 STEP 4: Trial Consumed - Check Status")
     print("-" * 60)
     print(f"   Trial available: {lm.has_trial_available()}")
     print(f"   Trial remaining: {lm.get_trial_remaining()}")
     print()
-    
+
     # Step 6: Show license dialog
     print("📱 STEP 5: Second Launch - License Required")
     print("-" * 60)
     show_license_dialog()
     input("Press ENTER to purchase a license...")
     print()
-    
+
     # Step 7: Purchase flow
     print("📱 STEP 6: Purchase Flow")
     print("-" * 60)
@@ -185,7 +190,7 @@ def simulate_workflow():
     print("💳 Payment completed successfully!")
     print("📧 License key sent via email: I3D-ADB1-9890-4517-8E0F")
     print()
-    
+
     # Step 8: Activate license
     print("📱 STEP 7: License Activation")
     print("-" * 60)
@@ -196,7 +201,7 @@ def simulate_workflow():
     print("   Plan: pro")
     print("   Credits: 300")
     print()
-    
+
     # Step 9: Full access
     print("📱 STEP 8: Full Access Unlocked! 🎉")
     print("-" * 60)
@@ -205,10 +210,10 @@ def simulate_workflow():
     print("✅ 300 credits available for API usage")
     print("✅ Priority support enabled")
     print()
-    
-    print("="*60)
+
+    print("=" * 60)
     print("  ✅ Workflow Demonstration Complete!")
-    print("="*60)
+    print("=" * 60)
     print()
     print("SUMMARY:")
     print("  • User tried the app with 1 free generation")
@@ -217,11 +222,12 @@ def simulate_workflow():
     print("  • Now has full access with 300 credits")
     print()
 
+
 def main():
     """Main function"""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("  🚀 ImageTo3D Pro - Trial System Demo")
-    print("="*60)
+    print("=" * 60)
     print()
     print("This demonstrates the complete user workflow:")
     print("  1. First launch → Trial offer")
@@ -229,30 +235,31 @@ def main():
     print("  3. Trial used → License required")
     print("  4. Purchase → Full access unlocked")
     print()
-    
+
     lm = get_license_manager()
     print(f"Current Status:")
     print(f"  Trial available: {lm.has_trial_available()}")
     print(f"  Trial remaining: {lm.get_trial_remaining()}")
     print()
-    
+
     print("Options:")
     print("  1. Run workflow demonstration")
     print("  2. Reset trial (for testing)")
     print("  3. Exit")
     print()
-    
+
     choice = input("Enter choice (1-3): ").strip()
-    
-    if choice == '1':
+
+    if choice == "1":
         simulate_workflow()
-    elif choice == '2':
+    elif choice == "2":
         lm.reset_trial()
         print("\n✅ Trial reset successfully!")
         print(f"   Trial available: {lm.has_trial_available()}")
         print(f"   Trial remaining: {lm.get_trial_remaining()}")
     else:
         print("\nGoodbye!")
+
 
 if __name__ == "__main__":
     main()

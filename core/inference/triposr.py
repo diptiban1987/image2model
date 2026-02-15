@@ -10,7 +10,9 @@ import psutil
 class TripoSRError(RuntimeError):
     """Raised when TripoSR cannot generate a valid mesh."""
 
-    def __init__(self, message: str, reason: str = "error", details: dict | None = None):
+    def __init__(
+        self, message: str, reason: str = "error", details: dict | None = None
+    ):
         super().__init__(message)
         self.reason = reason
         self.details = details or {}
@@ -36,11 +38,11 @@ class TripoSR:
     # Tiers calibrated against real-world crash data on Windows 10 / 16GB.
     _TIERS = [
         # (min_available_gb, mc_resolution, chunk_size, bake_texture, texture_res, threads)
-        (16, 256, 8192, True,  1024, "4"),   # 16GB+ → full quality
-        (12, 192, 8192, True,   512, "4"),   # 12GB+ → high quality
-        ( 8, 160, 8192, False,  512, "2"),   # 8GB+  → good quality (no texture bake)
-        ( 4, 128, 4096, False,  512, "2"),   # 4GB+  → moderate quality
-        ( 2,  96, 2048, False,  256, "1"),   # 2GB+  → minimal quality
+        (16, 256, 8192, True, 1024, "4"),  # 16GB+ → full quality
+        (12, 192, 8192, True, 512, "4"),  # 12GB+ → high quality
+        (8, 160, 8192, False, 512, "2"),  # 8GB+  → good quality (no texture bake)
+        (4, 128, 4096, False, 512, "2"),  # 4GB+  → moderate quality
+        (2, 96, 2048, False, 256, "1"),  # 2GB+  → minimal quality
     ]
     _MIN_RAM_GB = 2.0  # absolute minimum to even attempt
 
@@ -137,7 +139,7 @@ class TripoSR:
                 f"Insufficient RAM for local 3D generation. "
                 f"Only {available_gb:.1f}GB available, but TripoSR needs at "
                 f"least {self._MIN_RAM_GB}GB free RAM. "
-                f"Close other applications or use the Hitem3D API instead.",
+                f"Close other applications or use the Cloud API instead.",
                 reason="low_memory",
                 details={"available_gb": available_gb, "required_gb": self._MIN_RAM_GB},
             )
@@ -163,24 +165,30 @@ class TripoSR:
             # Detect memory-related crashes
             if any(
                 kw in error_msg.lower()
-                for kw in ("not enough memory", "allocate", "out of memory", "memoryerror")
+                for kw in (
+                    "not enough memory",
+                    "allocate",
+                    "out of memory",
+                    "memoryerror",
+                )
             ):
                 raise TripoSRError(
                     f"TripoSR ran out of memory during processing. "
                     f"Available RAM: {available_gb:.1f}GB. "
-                    f"Try closing other applications, or use the Hitem3D API "
+                    f"Try closing other applications, or use the Cloud API "
                     f"for cloud-based processing.",
                     reason="memory_error",
                     details={"available_gb": available_gb, "original_error": error_msg},
                 ) from exc
             else:
                 import traceback
+
                 tb = traceback.format_exc()
                 print(f"[TripoSR] ERROR: {exc}")
                 print(f"[TripoSR] Traceback: {tb}")
                 raise TripoSRError(
                     f"TripoSR failed during 3D generation: {error_msg}. "
-                    f"Use the Hitem3D API for reliable processing.",
+                    f"Use the Cloud API for reliable processing.",
                     reason="processing_error",
                     details={"original_error": error_msg},
                 ) from exc
@@ -231,9 +239,7 @@ class TripoSR:
         env.setdefault("OPENBLAS_NUM_THREADS", self._thread_count)
         env.setdefault("VECLIB_MAXIMUM_THREADS", self._thread_count)
         env.setdefault("NUMEXPR_NUM_THREADS", self._thread_count)
-        env.setdefault(
-            "PYTORCH_CUDA_ALLOC_CONF", "max_split_size_mb:64"
-        )
+        env.setdefault("PYTORCH_CUDA_ALLOC_CONF", "max_split_size_mb:64")
         env.setdefault("PYTORCH_JIT", "0")
         env.setdefault("PYTORCH_NO_CUDA_MEMORY_CACHING", "1")
 
@@ -289,7 +295,7 @@ class TripoSR:
             raise TripoSRError(
                 f"TripoSR subprocess failed with exit code {returncode}. "
                 f"This typically means the model ran out of memory or a "
-                f"dependency is missing. Use the Hitem3D API for reliable results.\n"
+                f"dependency is missing. Use the Cloud API for reliable results.\n"
                 f"Details: {stderr_text[-800:]}",
                 reason="subprocess_crash",
                 details={
@@ -314,9 +320,12 @@ class TripoSR:
                 "TripoSR ran successfully but did not produce an output mesh file. "
                 "This usually indicates the model could not extract 3D geometry "
                 "from your image. Try a different image with a clear single object, "
-                "or use the Hitem3D API.",
+                "or use the Cloud API.",
                 reason="no_output",
-                details={"expected_path": str(mesh_path), "found_files": found_files[:10]},
+                details={
+                    "expected_path": str(mesh_path),
+                    "found_files": found_files[:10],
+                },
             )
 
         mesh = o3d.io.read_triangle_mesh(str(mesh_path))
@@ -324,7 +333,7 @@ class TripoSR:
             raise TripoSRError(
                 "TripoSR produced an empty mesh. The 3D reconstruction could not "
                 "extract meaningful geometry from your image. Try a different image "
-                "with a clear single object, or use the Hitem3D API.",
+                "with a clear single object, or use the Cloud API.",
                 reason="empty_mesh",
                 details={"mesh_path": str(mesh_path)},
             )

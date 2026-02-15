@@ -1,4 +1,7 @@
 # ImageTo3D Pro - pinned for reproducibility
+
+# Tripo3D API Client (Official Python SDK)
+tripo3d>=0.3.10
 bcrypt>=4.0,<5
 torch>=2.0,<3.0
 torchvision

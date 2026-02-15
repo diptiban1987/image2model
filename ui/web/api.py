@@ -604,7 +604,7 @@ def _main_app_html():
                         </div>
                         <div class="radio-option">
                             <input type="radio" id="api" name="processing" value="api">
-                            <label for="api">Hitem3D API</label>
+                            <label for="api">Cloud API</label>
                         </div>
                     </div>
                 </div>
@@ -624,7 +624,7 @@ def _main_app_html():
                 <div class="api-options" id="apiOptions">
                     <div class="option-group">
                         <label class="option-label" for="apiToken">API Token</label>
-                        <input type="text" id="apiToken" placeholder="Enter your Hitem3D API token">
+                        <input type="text" id="apiToken" placeholder="Enter your Cloud API token">
                     </div>
 
                     <div class="option-group">
@@ -636,11 +636,11 @@ def _main_app_html():
                     <div class="option-group">
                         <label class="option-label" for="apiModel">Model</label>
                         <select id="apiModel">
-                            <option value="hitem3dv1.5">HiTeM3D v1.5</option>
-                            <option value="hitem3dv2.0">HiTeM3D v2.0</option>
-                            <option value="scene-portraitv1.5">Scene Portrait v1.5</option>
-                            <option value="scene-portraitv2.0">Scene Portrait v2.0</option>
-                            <option value="scene-portraitv2.1">Scene Portrait v2.1</option>
+<option value="hitem3dv1.5">Standard v1.5</option>
+                            <option value="hitem3dv2.0">Standard v2.0</option>
+                            <option value="scene-portraitv1.5">Portrait v1.5</option>
+                            <option value="scene-portraitv2.0">Portrait v2.0</option>
+                            <option value="scene-portraitv2.1">Portrait v2.1</option>
                         </select>
                         <div class="model-info" id="modelInfo">
                             General purpose 3D generation model. Recommended resolution: 1024
@@ -792,7 +792,7 @@ def _main_app_html():
             }
 
             function updateApiTokenPlaceholder() {
-                apiToken.placeholder = serverHasCredentials ? 'Using server credentials (optional)' : 'Enter your Hitem3D API token';
+                apiToken.placeholder = serverHasCredentials ? 'Using server credentials (optional)' : 'Enter your Cloud API token';
             }
 
             function formatCredits(value) {
@@ -820,7 +820,7 @@ def _main_app_html():
             function updateBalanceInfo() {
                 const useApi = document.querySelector('input[name="processing"]:checked').value === 'api';
                 if (!useApi) {
-                    setBalanceBox('Balance check is available for Hitem3D API.', '');
+                    setBalanceBox('Balance check is available for Cloud API.', '');
                     return;
                 }
                 const required = getRequiredCredits();
@@ -1021,7 +1021,7 @@ def _main_app_html():
                     lines.push(`<div class="error-box"><div><strong>Error:</strong> ${error_message}</div></div>`);
                 }
                 if (processing_method) {
-                    lines.push(`<div><strong>Method:</strong> ${processing_method === 'local' ? 'Local Processing' : 'Hitem3D API'}</div>`);
+                    lines.push(`<div><strong>Method:</strong> ${processing_method === 'local' ? 'Local Processing' : 'Cloud API'}</div>`);
                 }
                 if (api_model) {
                     lines.push(`<div><strong>Model:</strong> ${api_model}</div>`);
@@ -1163,7 +1163,7 @@ def _main_app_html():
                     if (status === 'queued') {
                         setStatus(useApi ? 'Queued for API processing...' : 'Queued for local processing...');
                     } else if (status === 'running') {
-                        const stageMsg = data.current_stage_msg || (useApi ? 'Processing via Hitem3D API...' : 'Processing locally...');
+                        const stageMsg = data.current_stage_msg || (useApi ? 'Processing via Cloud API...' : 'Processing locally...');
                         setStatus(stageMsg);
                     } else if (status === 'done') {
                         handleResult(data.result || {});
@@ -1219,11 +1219,11 @@ def _main_app_html():
             function updateApiOptions() {
                 const useApi = document.querySelector('input[name="processing"]:checked').value === 'api';
                 apiOptions.classList.toggle('active', useApi);
-                const placeholder = serverHasCredentials ? 'Using server credentials' : 'Enter your Hitem3D API token';
+                const placeholder = serverHasCredentials ? 'Using server credentials' : 'Enter your Cloud API token';
                 apiToken.placeholder = placeholder;
                 sysMode.textContent = useApi ? 'API' : 'Local';
                 requirementsText.textContent = useApi
-                    ? 'Cloud processing uses the Hitem3D API. Network stability improves completion time.'
+                    ? 'Cloud processing uses the Cloud API. Network stability improves completion time.'
                     : 'Local processing runs TripoSR on CPU and bakes a simple texture map from the input image (not full PBR materials). Keep at least 6GB RAM available for stable results.';
                 updateModelInfo();
                 updateBalanceInfo();
@@ -1351,7 +1351,7 @@ def _main_app_html():
                 if (useApi) {
                     const token = apiToken.value.trim();
                     if (!serverHasCredentials && !token) {
-                        setStatus('Please enter your Hitem3D API token');
+                        setStatus('Please enter your Cloud API token');
                         return;
                     }
                     if (token) {
@@ -1370,7 +1370,7 @@ def _main_app_html():
                 btn.disabled = true;
                 btn.textContent = 'Processing...';
                 setResults(null);
-                let preStatus = useApi ? 'Uploading to Hitem3D API and generating 3D model...' : 'Processing locally...';
+                let preStatus = useApi ? 'Uploading to Cloud API and generating 3D model...' : 'Processing locally...';
                 if (!useApi && lastSystemInfo && typeof lastSystemInfo.available_gb === 'number' && typeof lastSystemInfo.required_gb === 'number') {
                     if (lastSystemInfo.available_gb < lastSystemInfo.required_gb) {
                         preStatus = `Warning: Low available RAM (${lastSystemInfo.available_gb}GB available, ${lastSystemInfo.required_gb}GB required). Processing locally...`;
@@ -2270,9 +2270,9 @@ async def generate(
 
     Args:
         file: Uploaded image file
-        use_api: Whether to use Hitem3D API
-        api_token: Hitem3D API token (required if use_api=True and no server credentials)
-        api_model: Hitem3D model to use
+        use_api: Whether to use Cloud API
+        api_token: Cloud API token (required if use_api=True and no server credentials)
+        api_model: Cloud model to use
         api_resolution: Output resolution
         quality: Local mesh quality: draft, standard, high, production
     """
@@ -2284,13 +2284,13 @@ async def generate(
         ):
             raise HTTPException(
                 status_code=400,
-                detail="Hitem3D credentials are required when using Hitem3D API",
+                detail="Cloud API credentials are required when using Cloud API",
             )
         # Only validate token when user provided one (skip when using server-side credentials)
         if api_token and api_token.strip():
             if not await validate_api_token(api_token.strip()):
                 raise HTTPException(
-                    status_code=400, detail="Invalid Hitem3D API credentials"
+                    status_code=400, detail="Invalid Cloud API credentials"
                 )
     else:
         # Local processing with TripoSR - takes 5-15 minutes on CPU
@@ -2299,7 +2299,7 @@ async def generate(
             if available_gb < 2.5:
                 raise HTTPException(
                     status_code=400,
-                    detail="Local processing requires at least 2.5GB available RAM. Please close other applications or use Hitem3D API.",
+                    detail="Local processing requires at least 2.5GB available RAM. Please close other applications or use Cloud API.",
                 )
         except HTTPException:
             raise
@@ -2346,7 +2346,7 @@ async def update_credentials(
     if not raw:
         raise HTTPException(status_code=400, detail="API token is required")
     if not await validate_api_token(raw):
-        raise HTTPException(status_code=400, detail="Invalid Hitem3D API credentials")
+        raise HTTPException(status_code=400, detail="Invalid Cloud API credentials")
     save_hitem3d_credentials(raw)
     return {"saved": True}
 
@@ -2358,7 +2358,8 @@ async def hitem3d_balance(
     result = await get_hitem3d_balance(api_token.strip() if api_token else None)
     if result.get("error") == "credentials_missing":
         raise HTTPException(
-            status_code=400, detail="Hitem3D credentials are required to check balance"
+            status_code=400,
+            detail="Cloud API credentials are required to check balance",
         )
     return {"available": result.get("available")}
 
@@ -2382,7 +2383,7 @@ async def get_models(request: Request, _auth: bool = Depends(require_session)):
 
 @app.post("/validate-token")
 async def validate_token(token: str):
-    """Validate Hitem3D API token."""
+    """Validate Cloud API token."""
     is_valid = await validate_api_token(token)
     return {"valid": is_valid}
 
@@ -2391,7 +2392,7 @@ async def validate_token(token: str):
 async def credentials_availability(
     request: Request, _auth: bool = Depends(require_session)
 ):
-    """Check if server-side Hitem3D credentials are available."""
+    """Check if server-side Cloud API credentials are available."""
     creds = resolve_hitem3d_credentials(None)
     available = bool(
         creds["access_token"] or (creds["client_id"] and creds["client_secret"])

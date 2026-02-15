@@ -4,7 +4,7 @@ ImageTo3D Pro — Desktop Application
 Full-featured desktop app mirroring all web app capabilities:
   - Device fingerprint security login (hardware-locked)
   - Image upload with preview
-  - Local (TripoSR) and Hitem3D API processing
+  - Local (TripoSR) and Cloud API processing
   - Live progress bar with heartbeat updates
   - Color-coded RAM display (green/amber/red)
   - Activity log with timestamps
@@ -602,17 +602,25 @@ class App(QWidget):
         self.balance_timer.timeout.connect(self._fetch_balance)
 
         self.credit_costs = {
+            # Hitem3D models
             "hitem3dv1.5": {"512": 15, "1024": 20, "1536": 50, "1536pro": 70},
             "hitem3dv2.0": {"1536": 75, "1536pro": 90},
             "scene-portraitv1.5": {"1536": 70},
             "scene-portraitv2.0": {"1536pro": 70},
             "scene-portraitv2.1": {"1536pro": 70},
+            # Tripo3D models (estimated credits based on resolution)
+            "v2_5": {"512": 10, "1024": 20, "2048": 40},
+            "v2_0": {"1024": 25, "2048": 50},
+            "v1_4": {"512": 8, "1024": 15},
         }
 
         self._build_ui()
         self._update_model_description()
         self._update_run_enabled()
         self._refresh_system_info()
+
+        # Load saved API credentials
+        self._load_saved_credentials()
 
         self.system_timer = QTimer(self)
         self.system_timer.timeout.connect(self._refresh_system_info)
@@ -969,7 +977,7 @@ class App(QWidget):
         method_layout.addWidget(QLabel("Method:"))
 
         self.local_radio = QRadioButton("Local")
-        self.api_radio = QRadioButton("Hitem3D API")
+        self.api_radio = QRadioButton("Cloud API")
         self.local_radio.setChecked(True)
         self.local_radio.toggled.connect(self._on_method_changed)
         self.api_radio.toggled.connect(self._on_method_changed)
@@ -1014,9 +1022,12 @@ class App(QWidget):
 
         # Row 0: Token + Save button
         self.api_token_edit = QLineEdit()
-        self.api_token_edit.setPlaceholderText("Enter API token...")
+        self.api_token_edit.setPlaceholderText(
+            "Enter API token (Tripo3D) or AccessKey:SecretKey..."
+        )
+        self.api_token_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.api_token_edit.textChanged.connect(self._update_run_enabled)
-        self.api_token_edit.textChanged.connect(self._schedule_balance_fetch)
+        self.api_token_edit.textChanged.connect(self._on_token_changed)
 
         save_token_btn = QPushButton("Save")
         save_token_btn.setFixedWidth(70)
@@ -1038,7 +1049,7 @@ class App(QWidget):
 
         self.api_resolution_combo = QComboBox()
         self.api_resolution_combo.setFixedWidth(90)
-        self._update_resolution_options()
+        self._update_resolution_options_for_platform()
 
         self.api_format_combo = QComboBox()
         self.api_format_combo.setFixedWidth(70)
@@ -1130,7 +1141,7 @@ class App(QWidget):
                         self,
                         "Low RAM",
                         f"Only {available_gb:.1f}GB available. Local processing requires "
-                        f"at least 4GB. Close other apps or use Hitem3D API.",
+                        f"at least 4GB. Close other apps or use Cloud API.",
                     )
                     return
             except Exception:
@@ -1138,7 +1149,7 @@ class App(QWidget):
 
         self._set_running(True)
         self._start_time = time.time()
-        method_text = "Hitem3D API" if options["use_api"] else "Local Processing"
+        method_text = "Cloud API" if options["use_api"] else "Local Processing"
         self.status_label.setText(f"Running ({method_text})…")
         self.progress_bar.setValue(0)
         self.progress_msg.setText(f"Starting {method_text}...")
@@ -1214,7 +1225,7 @@ class App(QWidget):
                 )
 
         method = outputs.get("processing_method", "local")
-        method_text = "Hitem3D API" if method == "hitem3d_api" else "Local Processing"
+        method_text = "Cloud API" if method == "hitem3d_api" else "Local Processing"
         self.status_label.setText(f"✅ Completed ({method_text})")
         self.status_label.setStyleSheet(
             "color: #28a745; font-size: 12px; font-weight: bold;"
@@ -1365,7 +1376,7 @@ class App(QWidget):
     def _on_method_changed(self):
         use_api = self.api_radio.isChecked()
         self.api_group.setVisible(use_api)
-        self.sys_mode_label.setText("Hitem3D API" if use_api else "Local")
+        self.sys_mode_label.setText("Cloud API" if use_api else "Local")
         self.sys_mode_label.setStyleSheet(
             "color: #3b82f6; font-size: 11px; font-weight: 600;"
             if use_api
@@ -1374,23 +1385,6 @@ class App(QWidget):
         self._update_run_enabled()
         if use_api:
             self._schedule_balance_fetch()
-
-    def _on_model_changed(self):
-        self._update_resolution_options()
-        self._update_model_description()
-
-    def _update_resolution_options(self):
-        model_key = self.api_model_combo.currentData()
-        if not model_key:
-            return
-        model_info = get_available_models()
-        hitem3d_models = model_info.get("hitem3d", {}).get("models", {})
-        model_data = hitem3d_models.get(model_key, {})
-        resolutions = model_data.get("resolutions", ["1024"])
-        self.api_resolution_combo.clear()
-        for res in resolutions:
-            display = f"{res}³" if res != "1536pro" else "1536³ Pro"
-            self.api_resolution_combo.addItem(display, res)
 
     def _update_model_description(self):
         # Model description removed for compact UI
@@ -1461,14 +1455,42 @@ class App(QWidget):
             self.balance_error = "Add a valid API token to check balance."
             self.balance_label.setText(self.balance_error)
             return
+
+        # Detect platform and use appropriate balance checker
+        platform_type = self._detect_platform_from_token(token)
+
         try:
-            result = asyncio.run(get_hitem3d_balance(token or None))
-            self.balance_available = result.get("available")
-            self.balance_error = None
-            available = self.balance_available
-            self.balance_label.setText(
-                f"Balance: {available} credits" if available else "Balance unavailable"
-            )
+            if platform_type == "tripo3d":
+                # Use unified API for Tripo3D balance
+                from core.unified_api import Unified3DAPI, APICredentials
+
+                creds = APICredentials.from_string(token)
+                api = Unified3DAPI(credentials=creds)
+
+                async def get_tripo_balance():
+                    balance = await api.get_balance()
+                    await api.close()
+                    return balance
+
+                balance = asyncio.run(get_tripo_balance())
+
+                self.balance_available = balance
+                self.balance_error = None
+                if balance is not None:
+                    self.balance_label.setText(f"Balance: {balance:.0f} credits")
+                else:
+                    self.balance_label.setText("Balance unavailable")
+            else:
+                # Use Hitem3D balance check
+                result = asyncio.run(get_hitem3d_balance(token or None))
+                self.balance_available = result.get("available")
+                self.balance_error = None
+                available = self.balance_available
+                self.balance_label.setText(
+                    f"Balance: {available} credits"
+                    if available
+                    else "Balance unavailable"
+                )
         except Exception as exc:
             self.balance_error = f"Balance check failed: {exc}"
             self.balance_label.setText(self.balance_error)
@@ -1479,11 +1501,162 @@ class App(QWidget):
             QMessageBox.information(self, "Token", "Please enter the API token first.")
             return
         try:
-            save_hitem3d_credentials(token)
-            QMessageBox.information(self, "Token", "Server API token saved.")
+            # Use unified save function that handles both Tripo3D and Hitem3D
+            from core.unified_pipeline import save_api_credentials
+
+            result = save_api_credentials(token)
+
+            platform_name = (
+                "Tripo3D" if result["platform"] == "tripo3d" else "Cloud API"
+            )
+            QMessageBox.information(
+                self, "Token Saved", f"{platform_name} API token saved successfully!"
+            )
             self._schedule_balance_fetch()
         except Exception as exc:
             QMessageBox.critical(self, "Token", f"Failed to save: {exc}")
+
+    # ── Platform Detection & Dynamic UI ──
+    def _load_saved_credentials(self):
+        """Load saved API credentials from storage and populate the UI."""
+        try:
+            from core.unified_pipeline import load_saved_api_credentials
+
+            saved = load_saved_api_credentials()
+
+            if saved and saved.get("token"):
+                token = saved["token"]
+                platform = saved.get("platform", "unknown")
+
+                # Set the token in the UI (it will be masked)
+                self.api_token_edit.setText(token)
+
+                # Update platform-specific UI
+                self._update_platform_ui(token)
+
+                # Log the loaded credentials
+                platform_display = "Tripo3D" if platform == "tripo3d" else "Cloud API"
+                print(f"[UI] Loaded saved {platform_display} credentials")
+                self._log(f"Loaded saved {platform_display} credentials")
+
+                # Schedule balance check
+                self._schedule_balance_fetch()
+        except Exception as e:
+            print(f"[UI] Failed to load saved credentials: {e}")
+
+    def _on_token_changed(self):
+        """Handle API token text changes - update platform UI and schedule balance check."""
+        token = self.api_token_edit.text().strip()
+
+        # Update platform-specific UI (models, resolutions, etc.)
+        if token:
+            self._update_platform_ui(token)
+
+        # Schedule balance fetch
+        self._schedule_balance_fetch()
+
+    def _detect_platform_from_token(self, token: str) -> str:
+        """
+        Detect platform type from API token.
+        Returns: 'tripo3d', 'hitem3d', or 'unknown'
+        """
+        if not token:
+            return "unknown"
+
+        # Tripo3D keys start with 'tsk_' and don't contain colons
+        if token.startswith("tsk_") and ":" not in token:
+            return "tripo3d"
+
+        # Hitem3D uses client_id:secret format
+        if ":" in token:
+            return "hitem3d"
+
+        # Default assumption for long keys without colons (Tripo3D)
+        if len(token) > 30 and ":" not in token:
+            return "tripo3d"
+
+        return "hitem3d"
+
+    def _update_platform_ui(self, token: str):
+        """
+        Update UI elements based on detected platform.
+        This changes model dropdown, available features, etc.
+        """
+        platform_type = self._detect_platform_from_token(token)
+
+        # Update model combo box based on platform
+        self.api_model_combo.clear()
+
+        if platform_type == "tripo3d":
+            # Tripo3D models
+            models = {
+                "v2_5": "v2.5 (Latest - Balanced)",
+                "v2_0": "v2.0 (PBR Quality)",
+                "v1_4": "v1.4 (Fast)",
+            }
+            for model_id, model_name in models.items():
+                self.api_model_combo.addItem(model_name, model_id)
+        else:
+            # Hitem3D models (default fallback)
+            models = {
+                "hitem3dv1.5": "Standard v1.5",
+                "hitem3dv2.0": "Standard v2.0",
+                "scene-portraitv1.5": "Portrait v1.5",
+                "scene-portraitv2.0": "Portrait v2.0",
+                "scene-portraitv2.1": "Portrait v2.1",
+            }
+            for model_id, model_name in models.items():
+                self.api_model_combo.addItem(model_name, model_id)
+
+        # Update resolution options based on first model
+        self._update_resolution_options_for_platform(platform_type)
+
+        # Log platform detection
+        platform_display = "Tripo3D" if platform_type == "tripo3d" else "Cloud API"
+        print(f"[UI] Detected platform: {platform_display}")
+        self._log(f"Detected {platform_display} API")
+
+    def _update_resolution_options_for_platform(self, platform_type: str = None):
+        """Update resolution dropdown based on platform and selected model."""
+        if platform_type is None:
+            token = self.api_token_edit.text().strip()
+            platform_type = self._detect_platform_from_token(token)
+
+        model_key = self.api_model_combo.currentData()
+        if not model_key:
+            return
+
+        self.api_resolution_combo.clear()
+
+        if platform_type == "tripo3d":
+            # Tripo3D resolutions
+            resolutions_map = {
+                "v2_5": ["512", "1024", "2048"],
+                "v2_0": ["1024", "2048"],
+                "v1_4": ["512", "1024"],
+            }
+            resolutions = resolutions_map.get(model_key, ["1024"])
+        else:
+            # Hitem3D resolutions
+            resolutions_map = {
+                "hitem3dv1.5": ["512", "1024", "1536", "1536pro"],
+                "hitem3dv2.0": ["1536", "1536pro"],
+                "scene-portraitv1.5": ["1536"],
+                "scene-portraitv2.0": ["1536pro"],
+                "scene-portraitv2.1": ["1536pro"],
+            }
+            resolutions = resolutions_map.get(model_key, ["1024"])
+
+        for res in resolutions:
+            display = f"{res}³" if res != "1536pro" else "1536³ Pro"
+            self.api_resolution_combo.addItem(display, res)
+
+    def _on_model_changed(self):
+        """Handle model selection change."""
+        token = self.api_token_edit.text().strip()
+        platform_type = self._detect_platform_from_token(token)
+        self._update_resolution_options_for_platform(platform_type)
+        self._update_model_description()
 
     # ── Updates ──
     def _check_for_updates(self):
@@ -1550,7 +1723,7 @@ def run_app():
     # Load professional dark theme
     style_file = os.path.join(os.path.dirname(__file__), "styles.qss")
     if os.path.exists(style_file):
-        with open(style_file, "r") as f:
+        with open(style_file, "r", encoding="utf-8") as f:
             app.setStyleSheet(f.read())
 
     # Step 1: License check (optional)

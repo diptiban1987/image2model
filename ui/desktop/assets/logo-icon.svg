@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="64" height="64" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bgGradient" x1="0" y1="0" x2="256" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#667eea"/>
+      <stop offset="100%" stop-color="#764ba2"/>
+    </linearGradient>
+    <linearGradient id="cubeGradient" x1="50" y1="50" x2="206" y2="206" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#f093fb"/>
+      <stop offset="100%" stop-color="#f5576c"/>
+    </linearGradient>
+    <linearGradient id="imageGradient" x1="40" y1="40" x2="196" y2="196" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#4facfe"/>
+      <stop offset="100%" stop-color="#00f2fe"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Background Circle -->
+  <circle cx="128" cy="128" r="120" fill="url(#bgGradient)"/>
+  
+  <!-- 3D Cube Icon -->
+  <g transform="translate(128, 128) scale(0.7) translate(-128, -128)">
+    <!-- Cube Front Face -->
+    <polygon points="128,48 192,88 192,168 128,208 64,168 64,88" fill="url(#cubeGradient)" opacity="0.9"/>
+    <!-- Cube Top Face -->
+    <polygon points="128,48 192,88 128,108 64,88" fill="url(#cubeGradient)" opacity="0.6"/>
+    <!-- Cube Right Face -->
+    <polygon points="192,88 192,168 128,208 128,108" fill="url(#cubeGradient)" opacity="0.7"/>
+    
+    <!-- Image Icon Overlay -->
+    <rect x="88" y="108" width="80" height="60" rx="8" fill="white" opacity="0.95"/>
+    <rect x="96" y="116" width="64" height="44" rx="4" fill="url(#imageGradient)"/>
+    <circle cx="110" cy="132" r="8" fill="white" opacity="0.8"/>
+    <polygon points="100,152 120,140 140,152 160,136 160,152 100,152" fill="white" opacity="0.6"/>
+  </g>
+</svg>

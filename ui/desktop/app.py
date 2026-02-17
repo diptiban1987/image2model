@@ -985,17 +985,84 @@ class App(QWidget):
         return box
 
     def _build_activity_log(self):
-        box = QGroupBox("📋 Log")
+        box = QGroupBox("📋 Activity Log")
+        box.setStyleSheet("""
+            QGroupBox {
+                font-weight: 600;
+                font-size: 12px;
+                border: 1px solid #374151;
+                border-radius: 6px;
+                margin-top: 8px;
+                padding-top: 8px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+                color: #e5e7eb;
+            }
+        """)
         layout = QVBoxLayout(box)
-        layout.setSpacing(8)
-        layout.setContentsMargins(12, 16, 12, 12)
+        layout.setSpacing(0)
+        layout.setContentsMargins(0, 8, 0, 0)
 
+        # Create a scroll area for the log entries
+        from PySide6.QtWidgets import QScrollArea, QWidget
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background-color: #0f172a;
+            }
+            QScrollBar:vertical {
+                background: transparent;
+                width: 6px;
+                margin: 0;
+            }
+            QScrollBar::handle:vertical {
+                background: rgba(55, 65, 81, 0.6);
+                border-radius: 3px;
+                min-height: 20px;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+        """)
+
+        # Container for log entries
+        self.log_container = QWidget()
+        self.log_container.setStyleSheet("""
+            QWidget {
+                background-color: #0f172a;
+                border-radius: 4px;
+            }
+        """)
+        self.log_layout = QVBoxLayout(self.log_container)
+        self.log_layout.setSpacing(2)
+        self.log_layout.setContentsMargins(8, 8, 8, 8)
+        self.log_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        scroll.setWidget(self.log_container)
+        scroll.setMinimumHeight(120)
+        scroll.setMaximumHeight(180)
+
+        layout.addWidget(scroll)
+
+        # Store scroll reference
+        self._log_scroll = scroll
+
+        # Store reference for backward compatibility
         self.log_text = QPlainTextEdit()
-        self.log_text.setReadOnly(True)
-        self.log_text.setMinimumHeight(80)
-        self.log_text.setMaximumHeight(120)
+        self.log_text.setVisible(False)
 
-        layout.addWidget(self.log_text)
+        # Track log entries for styling
+        self._log_entries = []
+        self._log_start_time = None
+
         return box
 
     def _build_processing_options(self):
@@ -1326,6 +1393,17 @@ class App(QWidget):
         self.progress_msg.setText("Idle")
         self.elapsed_label.setText("Elapsed: --:--")
         self.eta_label.setText("ETA: --:--")
+
+        # Clear activity log
+        if hasattr(self, "log_layout"):
+            # Remove all widgets from log layout
+            while self.log_layout.count():
+                item = self.log_layout.takeAt(0)
+                if item and item.widget():
+                    item.widget().deleteLater()
+        self._log_entries = []
+        self._log_start_time = None
+
         self.log_text.clear()
         self._log("🔄 Reset.")
         self._update_run_enabled()
@@ -1387,8 +1465,62 @@ class App(QWidget):
             self.run_btn.setEnabled(True)
 
     def _log(self, text: str):
-        timestamp = time.strftime("%H:%M:%S")
-        self.log_text.appendPlainText(f"[{timestamp}] {text}")
+        """Add a styled log entry to the activity log."""
+        import time
+
+        # Initialize start time on first log
+        if self._log_start_time is None:
+            self._log_start_time = time.time()
+
+        # Calculate elapsed time
+        elapsed = time.time() - self._log_start_time
+        mins = int(elapsed // 60)
+        secs = int(elapsed % 60)
+        elapsed_str = f"{mins:01d}:{secs:02d}"
+
+        # Create styled log entry widget
+        entry_widget = QWidget()
+        entry_layout = QHBoxLayout(entry_widget)
+        entry_layout.setSpacing(8)
+        entry_layout.setContentsMargins(0, 3, 0, 3)
+        entry_layout.setAlignment(
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        )
+
+        # Status dot (colored indicator)
+        dot_label = QLabel("●")
+        dot_label.setStyleSheet("color: #38bdf8; font-size: 8px;")
+        dot_label.setFixedWidth(12)
+        entry_layout.addWidget(dot_label)
+
+        # Timestamp
+        ts_label = QLabel(elapsed_str)
+        ts_label.setStyleSheet(
+            "color: #64748b; font-size: 10px; font-family: 'JetBrains Mono', monospace;"
+        )
+        ts_label.setFixedWidth(40)
+        entry_layout.addWidget(ts_label)
+
+        # Message
+        msg_label = QLabel(text)
+        msg_label.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        msg_label.setWordWrap(True)
+        entry_layout.addWidget(msg_label, 1)
+
+        # Add to log container
+        self.log_layout.addWidget(entry_widget)
+        self._log_entries.append((entry_widget, dot_label))
+
+        # Update previous entries to show completed state
+        for i, (widget, dot) in enumerate(self._log_entries[:-1]):
+            dot.setStyleSheet("color: #22c55e; font-size: 8px;")  # Green for completed
+
+        # Scroll to bottom
+        QApplication.processEvents()
+        if hasattr(self, "_log_scroll"):
+            self._log_scroll.verticalScrollBar().setValue(
+                self._log_scroll.verticalScrollBar().maximum()
+            )
 
     def _load_preview(self, path: str):
         pix = QPixmap(path)

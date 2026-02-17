@@ -87,6 +87,7 @@ from core.multiangle_processor import run_multiangle_pipeline
 # Try to import license dialog (optional — app works without it)
 try:
     from ui.desktop.license_dialog import require_license_dialog
+    from core.license_manager import get_license_manager
 
     HAS_LICENSE = True
 except ImportError:
@@ -1715,6 +1716,9 @@ def run_app():
     """
     Full app startup flow:
     1. License check (if license module available)
+       - If valid license exists: skip to password login
+       - If license expired: show license dialog to renew
+       - If no license: show license dialog for trial/purchase
     2. Device fingerprint login
     3. Show main app
     """
@@ -1728,8 +1732,37 @@ def run_app():
 
     # Step 1: License check (optional)
     if HAS_LICENSE:
-        if not require_license_dialog():
-            return 1
+        license_manager = get_license_manager()
+        has_valid = license_manager.has_valid_license()
+        has_trial = license_manager.has_trial_available()
+
+        if has_valid:
+            # Valid license exists - check if expiring soon and warn user
+            license_info = license_manager.get_license_info()
+            if license_info:
+                days_remaining = license_info.get("days_remaining", 0)
+                if days_remaining <= 7 and days_remaining > 0:
+                    # Warn user that license is expiring soon
+                    QMessageBox.warning(
+                        None,
+                        "License Expiring Soon",
+                        f"Your license will expire in {days_remaining} days.\n\n"
+                        f"Please renew your license to continue using ImageTo3D Pro without interruption.",
+                    )
+                elif days_remaining <= 0:
+                    # License expired - show license dialog
+                    if not require_license_dialog():
+                        return 1
+            # Valid license - skip to password login
+            print("[Startup] Valid license found, skipping license dialog")
+        elif has_trial:
+            # Has trial available - show license dialog to let them start trial
+            if not require_license_dialog():
+                return 1
+        else:
+            # No valid license and no trial - show license dialog
+            if not require_license_dialog():
+                return 1
 
     # Step 2: Device fingerprint login
     login = DeviceLoginDialog()

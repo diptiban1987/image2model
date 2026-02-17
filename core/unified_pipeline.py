@@ -295,6 +295,9 @@ async def _run_api_pipeline(
     Returns:
         Dict with paths and stats
     """
+    import trimesh
+    import os
+
     t0 = time.perf_counter()
 
     # Wrap progress callback to adapt signature
@@ -317,18 +320,68 @@ async def _run_api_pipeline(
     )
 
     try:
-        # Generate 3D model using API
-        format_map = {"obj": 1, "glb": 2, "stl": 3, "fbx": 4, "usdz": 5}
-        format_type = format_map.get((api_format or "").lower(), 2)
+        # Generate 3D model using API - always use GLB as primary format for best quality
         result = await api.generate_3d_model(
             image_path=image_path,
             output_dir="output",
             model_name=name,
             model=api_model,
             resolution=api_resolution,
-            format_type=format_type,
+            format_type=2,  # GLB format
             **kwargs,
         )
+
+        # Convert to multiple formats
+        if progress_callback:
+            progress_callback(96, "Converting to multiple formats...")
+
+        # Find the downloaded GLB file
+        glb_path = result.get("glb")
+        if not glb_path or not os.path.exists(glb_path):
+            # Try to find any file that was downloaded
+            for key, path in result.items():
+                if path and os.path.exists(path):
+                    glb_path = path
+                    break
+
+        if glb_path and os.path.exists(glb_path):
+            output_dir = "output"
+            base_name = name
+
+            try:
+                # Load the mesh
+                mesh = trimesh.load(glb_path, process=False)
+
+                # Export to all formats
+                formats_to_export = ["obj", "glb", "stl"]
+                for fmt in formats_to_export:
+                    if fmt == "glb" and "glb" in result:
+                        # Already have GLB
+                        continue
+
+                    output_path = os.path.join(output_dir, f"{base_name}.{fmt}")
+                    try:
+                        if fmt == "obj":
+                            mesh.export(output_path, file_type="obj")
+                            result["obj"] = output_path
+                        elif fmt == "stl":
+                            mesh.export(output_path, file_type="stl")
+                            result["stl"] = output_path
+                        elif fmt == "glb":
+                            mesh.export(output_path, file_type="glb")
+                            result["glb"] = output_path
+                    except Exception as e:
+                        print(f"[API Pipeline] Failed to export {fmt}: {e}")
+
+                if progress_callback:
+                    progress_callback(
+                        98,
+                        f"Exported {len([k for k in result.keys() if not k.startswith('_') and k not in ['processing_method', 'api_used', 'api_model', 'api_resolution', 'api_format', 'stats']])} formats",
+                    )
+
+            except Exception as e:
+                print(f"[API Pipeline] Format conversion failed: {e}")
+                # Continue with just the original file
 
         t1 = time.perf_counter()
 

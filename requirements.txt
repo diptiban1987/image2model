@@ -15,6 +15,7 @@ uvicorn[standard]
 pyside6>=6.5
 tqdm
 rembg
+onnxruntime
 psutil
 httpx
 gunicorn

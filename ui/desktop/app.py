@@ -433,6 +433,7 @@ class PipelineWorker(QThread):
     finished = Signal(dict)
     failed = Signal(str)
     progress = Signal(int, str)  # (percent, message)
+    log_event = Signal(str)  # Detailed log messages for activity log
 
     def __init__(
         self,
@@ -456,9 +457,29 @@ class PipelineWorker(QThread):
 
     def run(self):
         try:
+            # Track detailed events for activity log
+            event_log = []
+
+            def _log_event(msg):
+                """Log detailed events for activity log"""
+                event_log.append(msg)
+                self.log_event.emit(msg)
+
+            # Initial events
+            _log_event("Initializing pipeline...")
+            if self.use_api:
+                _log_event(f"Using Cloud API with model: {self.api_model}")
+                _log_event(
+                    f"Resolution: {self.api_resolution}, Format: {self.api_format}"
+                )
+            else:
+                _log_event(f"Using local processing with quality: {self.quality}")
 
             def _progress_cb(stage, pct, msg):
                 self.progress.emit(int(pct), msg)
+                # Also log detailed progress events
+                if stage and msg:
+                    _log_event(f"[{stage}] {msg}")
 
             result = run_pipeline(
                 self.image_path,
@@ -470,9 +491,12 @@ class PipelineWorker(QThread):
                 quality=self.quality,
                 progress_callback=_progress_cb,
             )
+
+            _log_event("Processing completed successfully")
             self.progress.emit(100, "Complete!")
             self.finished.emit(result)
         except Exception as exc:
+            self.log_event.emit(f"Error: {str(exc)}")
             self.failed.emit(str(exc))
 
 
@@ -480,6 +504,7 @@ class MultiAngleWorker(QThread):
     finished = Signal(dict)
     failed = Signal(str)
     progress = Signal(int, str)
+    log_event = Signal(str)  # Detailed log messages for activity log
 
     def __init__(
         self,
@@ -503,6 +528,19 @@ class MultiAngleWorker(QThread):
 
     def run(self):
         try:
+            # Track detailed events for activity log
+            def _log_event(msg):
+                """Log detailed events for activity log"""
+                self.log_event.emit(msg)
+
+            # Initial events
+            _log_event("Starting multi-angle processing...")
+            _log_event(f"Processing {len(self.image_paths)} images")
+            if self.use_api:
+                _log_event(f"Using Cloud API with model: {self.api_model}")
+            else:
+                _log_event(f"Using local processing with quality: {self.quality}")
+
             self.progress.emit(10, "Starting multi-angle processing...")
             result = run_multiangle_pipeline(
                 self.image_paths,
@@ -1179,6 +1217,7 @@ class App(QWidget):
         self.worker.progress.connect(self._on_progress)
         self.worker.finished.connect(self._on_finished)
         self.worker.failed.connect(self._on_failed)
+        self.worker.log_event.connect(self._log)
         self.worker.start()
 
     def _on_progress(self, pct: int, msg: str):

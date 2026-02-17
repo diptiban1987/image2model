@@ -114,6 +114,7 @@ class Hitem3DAPI:
         format_type: int = 1,  # 1 = obj format
         face_count: int = 1000000,
         callback_url: Optional[str] = None,
+        progress_callback=None,
     ) -> Dict[str, Any]:
         """
         Create a new 3D generation task.
@@ -126,11 +127,16 @@ class Hitem3DAPI:
             format_type: Output format (1=obj, 2=glb, 3=stl, 4=fbx, 5=usdz)
             face_count: Number of faces (100000-2000000)
             callback_url: Optional callback URL for status updates
+            progress_callback: Optional callback(percent, message) for progress updates
 
         Returns:
             Dict containing task_id and status
         """
         url = f"{self.base_url}/open-api/v1/submit-task"
+
+        # Report upload start
+        if progress_callback:
+            progress_callback(5, f"Uploading image to Cloud API...")
 
         # Prepare form data
         form_data = {
@@ -166,6 +172,11 @@ class Hitem3DAPI:
                     "Hitem3D balance is not enough. Please credit your account to generate."
                 )
             raise Exception(f"API error: {msg}")
+
+        # Report task created
+        task_id = result["data"].get("task_id", "unknown")
+        if progress_callback:
+            progress_callback(10, f"Task created (ID: {task_id[:12]}...)")
 
         return result["data"]
 
@@ -250,6 +261,7 @@ class Hitem3DAPI:
         """
         start_time = time.time()
         last_progress_update = 0
+        last_state = None
 
         # Initial progress
         if progress_callback:
@@ -259,31 +271,75 @@ class Hitem3DAPI:
             elapsed = time.time() - start_time
             status = await self.get_task_status(task_id)
 
-            # Calculate progress based on elapsed time (typical processing takes 2-5 minutes)
-            # Progress from 15% to 90% based on elapsed time up to 10 minutes
-            estimated_total = 600  # 10 minutes estimate
-            progress_pct = min(90, 15 + int((elapsed / estimated_total) * 75))
-
-            # Update progress every 10 seconds or when state changes
-            if progress_callback and (
-                elapsed - last_progress_update >= 10 or progress_pct >= 90
-            ):
-                state = (
-                    status.get("state")
-                    or status.get("status")
-                    or status.get("task_status")
-                )
-                msg = f"Processing... ({int(elapsed)}s elapsed)"
-                if state:
-                    msg = f"Status: {state} ({int(elapsed)}s)"
-                progress_callback(progress_pct, msg)
-                last_progress_update = elapsed
+            # Get current state from API response
             state = (
                 status.get("state")
                 or status.get("status")
                 or status.get("task_status")
                 or status.get("taskState")
             )
+
+            # Calculate progress based on elapsed time (typical processing takes 2-5 minutes)
+            # Progress from 15% to 90% based on elapsed time up to 10 minutes
+            estimated_total = 600  # 10 minutes estimate
+            progress_pct = min(90, 15 + int((elapsed / estimated_total) * 75))
+
+            # Determine detailed status message based on state
+            state_str = (
+                str(state or "").lower() if not isinstance(state, (int, float)) else ""
+            )
+            state_int = int(state) if isinstance(state, (int, float)) else None
+
+            # Build detailed message based on status
+            if state_int is not None:
+                # Numeric state codes
+                if state_int == 0 or state_int == 1:
+                    status_msg = "Waiting in queue..."
+                elif state_int == 2 or state_int == 200:
+                    status_msg = "Processing completed"
+                elif state_int == 3:
+                    status_msg = "Processing..."
+                elif state_int == -1 or state_int == 500:
+                    status_msg = "Processing failed"
+                else:
+                    status_msg = f"Status code: {state_int}"
+            else:
+                # String state
+                if state_str in {"queued", "pending", "waiting"}:
+                    status_msg = "Waiting in queue..."
+                elif state_str in {"processing", "running", "working"}:
+                    status_msg = "AI is generating 3D model..."
+                elif state_str in {
+                    "success",
+                    "succeeded",
+                    "completed",
+                    "complete",
+                    "finish",
+                    "finished",
+                    "done",
+                    "ok",
+                }:
+                    status_msg = "Processing completed"
+                elif state_str in {"failed", "error", "cancelled", "timeout"}:
+                    status_msg = "Processing failed"
+                elif state_str:
+                    status_msg = f"Status: {state_str}"
+                else:
+                    status_msg = "Checking status..."
+
+            # Update progress on state change or every 10 seconds
+            state_changed = state != last_state
+            time_to_update = elapsed - last_progress_update >= 10
+
+            if progress_callback and (
+                state_changed or time_to_update or progress_pct >= 90
+            ):
+                msg = f"{status_msg} ({int(elapsed)}s elapsed)"
+                progress_callback(progress_pct, msg)
+                last_progress_update = elapsed
+                last_state = state
+
+            # Check completion states
             if isinstance(state, (int, float)):
                 s = int(state)
                 if s in (2, 200):
@@ -309,6 +365,8 @@ class Hitem3DAPI:
                     raise Exception(
                         f"Task failed: {status.get('error', 'Unknown error')}"
                     )
+
+            # Check if result URLs are available
             if any(
                 k in status and status.get(k)
                 for k in (
@@ -322,6 +380,7 @@ class Hitem3DAPI:
                 )
             ):
                 return status
+
             await asyncio.sleep(poll_interval)
 
         raise Exception(f"Task timeout after {max_wait_time} seconds")

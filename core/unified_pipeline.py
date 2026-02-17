@@ -297,6 +297,18 @@ async def _run_api_pipeline(
     """
     t0 = time.perf_counter()
 
+    # Wrap progress callback to adapt signature
+    # Hitem3D API calls: callback(percent, message)
+    # UI expects: callback(stage, percent, message)
+    progress_callback = kwargs.get("progress_callback")
+    if progress_callback:
+        original_callback = progress_callback
+
+        def _wrapped_progress(percent, message):
+            original_callback("api", percent, message)
+
+        kwargs["progress_callback"] = _wrapped_progress
+
     # Initialize API client
     api = Hitem3DAPI(
         access_token=credentials["access_token"],

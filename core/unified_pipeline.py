@@ -303,14 +303,16 @@ async def _run_api_pipeline(
     # Wrap progress callback to adapt signature
     # Hitem3D API calls: callback(percent, message)
     # UI expects: callback(stage, percent, message)
-    progress_callback = kwargs.get("progress_callback")
-    if progress_callback:
-        original_callback = progress_callback
+    original_callback = kwargs.get("progress_callback")
+    wrapped_callback = None
+
+    if original_callback:
 
         def _wrapped_progress(percent, message):
             original_callback("api", percent, message)
 
-        kwargs["progress_callback"] = _wrapped_progress
+        wrapped_callback = _wrapped_progress
+        kwargs["progress_callback"] = wrapped_callback
 
     # Initialize API client
     api = Hitem3DAPI(
@@ -332,8 +334,8 @@ async def _run_api_pipeline(
         )
 
         # Convert to multiple formats
-        if progress_callback:
-            progress_callback(96, "Converting to multiple formats...")
+        if wrapped_callback:
+            wrapped_callback(96, "Converting to multiple formats...")
 
         # Find the downloaded GLB file
         glb_path = result.get("glb")
@@ -354,30 +356,31 @@ async def _run_api_pipeline(
 
                 # Export to all formats
                 formats_to_export = ["obj", "glb", "stl"]
+                exported_count = 0
                 for fmt in formats_to_export:
                     if fmt == "glb" and "glb" in result:
                         # Already have GLB
+                        exported_count += 1
                         continue
 
                     output_path = os.path.join(output_dir, f"{base_name}.{fmt}")
                     try:
-                        if fmt == "obj":
-                            mesh.export(output_path, file_type="obj")
-                            result["obj"] = output_path
-                        elif fmt == "stl":
-                            mesh.export(output_path, file_type="stl")
-                            result["stl"] = output_path
-                        elif fmt == "glb":
-                            mesh.export(output_path, file_type="glb")
-                            result["glb"] = output_path
+                        if isinstance(mesh, trimesh.Scene):
+                            # For scenes, try to export the first mesh
+                            for name_geo, geom in mesh.geometry.items():
+                                geom.export(output_path, file_type=fmt)
+                                result[fmt] = output_path
+                                exported_count += 1
+                                break
+                        else:
+                            mesh.export(output_path, file_type=fmt)
+                            result[fmt] = output_path
+                            exported_count += 1
                     except Exception as e:
                         print(f"[API Pipeline] Failed to export {fmt}: {e}")
 
-                if progress_callback:
-                    progress_callback(
-                        98,
-                        f"Exported {len([k for k in result.keys() if not k.startswith('_') and k not in ['processing_method', 'api_used', 'api_model', 'api_resolution', 'api_format', 'stats']])} formats",
-                    )
+                if wrapped_callback:
+                    wrapped_callback(98, f"Exported {exported_count} formats")
 
             except Exception as e:
                 print(f"[API Pipeline] Format conversion failed: {e}")

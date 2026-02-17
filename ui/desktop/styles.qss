@@ -3,6 +3,46 @@
 /*  Matches the web app's glassmorphism-inspired design            */
 /* ═══════════════════════════════════════════════════════════════ */
 
+/* ── Animations ── */
+@keyframes gradientShift {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+}
+
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.7; }
+    100% { opacity: 1; }
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateX(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+@keyframes glow {
+    0% { box-shadow: 0 0 5px rgba(59, 130, 246, 0.5); }
+    50% { box-shadow: 0 0 20px rgba(139, 92, 246, 0.8); }
+    100% { box-shadow: 0 0 5px rgba(59, 130, 246, 0.5); }
+}
+
 /* ── Global ── */
 QWidget {
     background-color: #111111;
@@ -62,22 +102,42 @@ QPushButton:disabled {
 QProgressBar {
     background-color: #1e293b;
     border: 1px solid #334155;
-    border-radius: 6px;
-    height: 24px;
+    border-radius: 8px;
+    height: 28px;
     text-align: center;
-    color: #e5e7eb;
+    color: #ffffff;
     font-weight: bold;
-    font-size: 12px;
+    font-size: 13px;
+    font-family: "Segoe UI", "Inter", sans-serif;
 }
 
 QProgressBar::chunk {
     background: qlineargradient(
         x1:0, y1:0, x2:1, y2:0,
-        stop:0 #3b82f6,
-        stop:0.5 #8b5cf6,
-        stop:1 #06b6d4
+        stop:0 #06b6d4,
+        stop:0.2 #3b82f6,
+        stop:0.4 #8b5cf6,
+        stop:0.6 #ec4899,
+        stop:0.8 #f59e0b,
+        stop:1 #10b981
     );
-    border-radius: 6px;
+    background-size: 200% 100%;
+    border-radius: 8px;
+    animation: gradientShift 3s ease infinite;
+}
+
+QProgressBar[progressMode="indeterminate"]::chunk {
+    background: qlineargradient(
+        x1:0, y1:0, x2:1, y2:0,
+        stop:0 #06b6d4,
+        stop:0.2 #3b82f6,
+        stop:0.4 #8b5cf6,
+        stop:0.6 #ec4899,
+        stop:0.8 #f59e0b,
+        stop:1 #10b981
+    );
+    background-size: 200% 100%;
+    animation: gradientShift 1.5s ease infinite;
 }
 
 /* ── Text Input ── */

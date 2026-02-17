@@ -93,9 +93,20 @@ try:
 except ImportError:
     HAS_LICENSE = False
 
-APP_VERSION = "2.0.0"
-UPDATE_URL = os.getenv("IMAGETO3D_UPDATE_URL", "").strip()
-CONFIG_DIR = Path(__file__).resolve().parent.parent.parent / "config"
+APP_VERSION = "2.1.0"
+UPDATE_URL = os.getenv("IMAGETO3D_UPDATE_URL", "https://raw.githubusercontent.com/diptiban1987/ImageTo3D_Pro/main/updates.json").strip()
+
+def get_resource_path(relative_path):
+    """Get absolute path to resource, works for dev and for PyInstaller"""
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+    return os.path.join(base_path, relative_path)
+
+CONFIG_DIR = Path(get_resource_path("config"))
 DEVICE_AUTH_FILE = CONFIG_DIR / "device_auth.json"
 
 
@@ -890,14 +901,38 @@ class App(QWidget):
         self.progress_bar.setRange(0, 100)
         self.progress_bar.setValue(0)
         self.progress_bar.setTextVisible(True)
+        self.progress_bar.setFormat("%p%")
         layout.addWidget(self.progress_bar)
 
+        self.current_task_container = QWidget()
+        task_layout = QHBoxLayout(self.current_task_container)
+        task_layout.setSpacing(10)
+        task_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.task_icon_label = QLabel("⏳")
+        self.task_icon_label.setStyleSheet("font-size: 18px;")
+        self.task_icon_label.setFixedWidth(28)
+        task_layout.addWidget(self.task_icon_label)
+
+        self.task_message_label = QLabel("Ready")
+        self.task_message_label.setStyleSheet("""
+            color: #e5e7eb;
+            font-size: 13px;
+            font-weight: 500;
+            background-color: #1e293b;
+            border-radius: 6px;
+            padding: 8px 12px;
+        """)
+        self.task_message_label.setWordWrap(True)
+        task_layout.addWidget(self.task_message_label, 1)
+
+        layout.addWidget(self.current_task_container)
+
         self.progress_msg = QLabel("Idle")
-        self.progress_msg.setStyleSheet("color: #94a3b8; font-size: 12px;")
+        self.progress_msg.setStyleSheet("color: #64748b; font-size: 11px;")
         self.progress_msg.setWordWrap(True)
         layout.addWidget(self.progress_msg)
 
-        # Time info row
         time_row = QHBoxLayout()
         self.elapsed_label = QLabel("Elapsed: --:--")
         self.elapsed_label.setStyleSheet(
@@ -912,7 +947,6 @@ class App(QWidget):
         time_row.addWidget(self.eta_label)
         layout.addLayout(time_row)
 
-        # Status message
         self.status_label = QLabel("")
         self.status_label.setStyleSheet(
             "color: #60a5fa; font-size: 12px; font-weight: 600;"
@@ -1259,6 +1293,8 @@ class App(QWidget):
         self.status_label.setText(f"Running ({method_text})…")
         self.progress_bar.setValue(0)
         self.progress_msg.setText(f"Starting {method_text}...")
+        self.task_message_label.setText(f"Starting {method_text}...")
+        self.task_icon_label.setText("🚀")
         self._log(f"🚀 Starting pipeline with {method_text}…")
 
         if options["use_api"]:
@@ -1291,7 +1327,42 @@ class App(QWidget):
         self.progress_bar.setValue(pct)
         self.progress_msg.setText(msg)
 
-        # Update ETA
+        self.task_message_label.setText(msg)
+
+        stage_icons = {
+            "preprocessing": "🔧",
+            "preprocess": "🔧",
+            "loading": "📥",
+            "load": "📥",
+            "model": "🤖",
+            "inference": "🤖",
+            "predict": "🤖",
+            "generation": "✨",
+            "generate": "✨",
+            "mesh": "📐",
+            "geometry": "📐",
+            "texture": "🎨",
+            "texturing": "🎨",
+            "material": "🎨",
+            "export": "💾",
+            "save": "💾",
+            "upload": "☁️",
+            "api": "☁️",
+            "complete": "✅",
+            "done": "✅",
+            "finish": "✅",
+        }
+
+        msg_lower = msg.lower()
+        icon = "⏳"
+        for key, value in stage_icons.items():
+            if key in msg_lower:
+                icon = value
+                break
+        self.task_icon_label.setText(icon)
+
+        QApplication.processEvents()
+
         if self._start_time and pct > 0:
             elapsed = time.time() - self._start_time
             if pct < 100:
@@ -1339,6 +1410,8 @@ class App(QWidget):
         )
         self.progress_bar.setValue(100)
         self.progress_msg.setText("Done! 3D files generated successfully.")
+        self.task_message_label.setText("Complete! Your 3D model is ready.")
+        self.task_icon_label.setText("✅")
         self.eta_label.setText("ETA: 00:00")
 
         stats = outputs.get("stats") or {}
@@ -1372,6 +1445,8 @@ class App(QWidget):
         )
         self.progress_bar.setValue(0)
         self.progress_msg.setText("Processing failed.")
+        self.task_message_label.setText("Processing failed. Check logs for details.")
+        self.task_icon_label.setText("❌")
         self._log(f"❌ Error: {message}")
         QMessageBox.critical(self, "Processing Error", message)
         self._set_running(False)
@@ -1391,6 +1466,8 @@ class App(QWidget):
         self.status_label.setText("")
         self.progress_bar.setValue(0)
         self.progress_msg.setText("Idle")
+        self.task_message_label.setText("Ready")
+        self.task_icon_label.setText("⏳")
         self.elapsed_label.setText("Elapsed: --:--")
         self.eta_label.setText("ETA: --:--")
 
@@ -1468,32 +1545,76 @@ class App(QWidget):
         """Add a styled log entry to the activity log."""
         import time
 
-        # Initialize start time on first log
         if self._log_start_time is None:
             self._log_start_time = time.time()
 
-        # Calculate elapsed time
         elapsed = time.time() - self._log_start_time
         mins = int(elapsed // 60)
         secs = int(elapsed % 60)
         elapsed_str = f"{mins:01d}:{secs:02d}"
 
-        # Create styled log entry widget
+        log_icons = {
+            "starting": "🚀",
+            "start": "🚀",
+            "init": "⚙️",
+            "loading": "📥",
+            "load": "📥",
+            "preprocess": "🔧",
+            "processing": "⚡",
+            "model": "🤖",
+            "inference": "🤖",
+            "generate": "✨",
+            "generation": "✨",
+            "mesh": "📐",
+            "geometry": "📐",
+            "texture": "🎨",
+            "texturing": "🎨",
+            "material": "🎨",
+            "export": "💾",
+            "save": "💾",
+            "upload": "☁️",
+            "complete": "✅",
+            "done": "✅",
+            "finish": "✅",
+            "success": "✅",
+            "error": "❌",
+            "fail": "❌",
+            "warning": "⚠️",
+            "warn": "⚠️",
+            "info": "ℹ️",
+            "file": "📄",
+            "files": "📦",
+        }
+
+        text_lower = text.lower()
+        icon = "📋"
+        for key, value in log_icons.items():
+            if key in text_lower:
+                icon = value
+                break
+
         entry_widget = QWidget()
+        entry_widget.setStyleSheet("""
+            QWidget {
+                background-color: #1e293b;
+                border-radius: 6px;
+                padding: 6px 10px;
+                margin-bottom: 4px;
+            }
+        """)
+
         entry_layout = QHBoxLayout(entry_widget)
-        entry_layout.setSpacing(8)
-        entry_layout.setContentsMargins(0, 3, 0, 3)
+        entry_layout.setSpacing(10)
+        entry_layout.setContentsMargins(8, 4, 8, 4)
         entry_layout.setAlignment(
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
 
-        # Status dot (colored indicator)
-        dot_label = QLabel("●")
-        dot_label.setStyleSheet("color: #38bdf8; font-size: 8px;")
-        dot_label.setFixedWidth(12)
-        entry_layout.addWidget(dot_label)
+        icon_label = QLabel(icon)
+        icon_label.setStyleSheet("font-size: 14px;")
+        icon_label.setFixedWidth(24)
+        entry_layout.addWidget(icon_label)
 
-        # Timestamp
         ts_label = QLabel(elapsed_str)
         ts_label.setStyleSheet(
             "color: #64748b; font-size: 10px; font-family: 'JetBrains Mono', monospace;"
@@ -1501,21 +1622,17 @@ class App(QWidget):
         ts_label.setFixedWidth(40)
         entry_layout.addWidget(ts_label)
 
-        # Message
         msg_label = QLabel(text)
-        msg_label.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        msg_label.setStyleSheet("color: #e5e7eb; font-size: 11px;")
         msg_label.setWordWrap(True)
         entry_layout.addWidget(msg_label, 1)
 
-        # Add to log container
         self.log_layout.addWidget(entry_widget)
-        self._log_entries.append((entry_widget, dot_label))
+        self._log_entries.append((entry_widget, icon_label))
 
-        # Update previous entries to show completed state
-        for i, (widget, dot) in enumerate(self._log_entries[:-1]):
-            dot.setStyleSheet("color: #22c55e; font-size: 8px;")  # Green for completed
+        for i, (widget, icon_lbl) in enumerate(self._log_entries[:-1]):
+            icon_lbl.setStyleSheet("font-size: 12px; opacity: 0.6;")
 
-        # Scroll to bottom
         QApplication.processEvents()
         if hasattr(self, "_log_scroll"):
             self._log_scroll.verticalScrollBar().setValue(

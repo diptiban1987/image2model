@@ -14,6 +14,7 @@ import psutil
 import asyncio
 import time
 import uuid
+import tempfile
 from pathlib import Path
 from typing import Optional, Dict, Any
 from core.unified_pipeline import (
@@ -92,157 +93,474 @@ async def require_session(request: Request) -> bool:
 
 
 def _main_app_html():
-    """Return the main app HTML (used by index when authenticated)."""
+    """Return the main app HTML matching desktop app layout."""
     return """
     <!DOCTYPE html>
     <html lang="en">
     <head>
         <meta charset="UTF-8" />
-        <title>Image to 3D Converter</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Image → 3D Pro</title>
         <style>
-            body {
-                font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-                background: radial-gradient(circle at top, #1e293b, #020617);
-                color: #e5e7eb;
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                min-height: 100vh;
+            * {
+                box-sizing: border-box;
                 margin: 0;
+                padding: 0;
             }
-            .card {
-                background: rgba(15, 23, 42, 0.95);
-                border-radius: 16px;
-                padding: 24px 28px;
-                box-shadow: 0 24px 60px rgba(15, 23, 42, 0.8);
-                width: 100%;
-                max-width: 520px;
-                border: 1px solid rgba(148, 163, 184, 0.25);
+
+            body {
+                font-family: "Segoe UI", "Inter", system-ui, sans-serif;
+                background-color: #111111;
+                color: #e5e7eb;
+                min-height: 100vh;
+                display: flex;
             }
-            h1 {
-                margin: 0 0 6px;
-                font-size: 24px;
+
+            /* ── Sidebar ── */
+            .sidebar {
+                width: 260px;
+                background-color: #0a0a0a;
+                border-right: 1px solid #1e293b;
+                display: flex;
+                flex-direction: column;
+                padding: 20px 16px;
+                flex-shrink: 0;
             }
-            p {
-                margin: 0 0 18px;
-                color: #9ca3af;
-            }
-            .dropzone {
-                border: 1px dashed #4b5563;
-                border-radius: 12px;
-                padding: 20px;
+
+            .logo-container {
                 text-align: center;
-                cursor: pointer;
-                background: rgba(15,23,42,0.6);
-                transition: border-color 0.15s ease, background 0.15s ease;
+                margin-bottom: 24px;
             }
-            .dropzone.dragover {
-                border-color: #22c55e;
-                background: rgba(21,128,61,0.15);
+
+            .logo {
+                font-size: 20px;
+                font-weight: 700;
+                color: #60a5fa;
+                margin-bottom: 4px;
             }
+
+            .version {
+                color: #64748b;
+                font-size: 11px;
+                font-weight: 500;
+            }
+
+            /* ── Group Boxes ── */
+            .group-box {
+                border: 1px solid #1e293b;
+                border-radius: 8px;
+                margin-top: 12px;
+                padding: 16px 12px 12px 12px;
+                background-color: #161616;
+                position: relative;
+            }
+
+            .group-box-title {
+                position: absolute;
+                top: -10px;
+                left: 12px;
+                background-color: #161616;
+                padding: 0 6px;
+                color: #60a5fa;
+                font-size: 11px;
+                font-weight: 600;
+                text-transform: uppercase;
+            }
+
+            .group-box#deviceBox {
+                border-color: #3b82f6;
+            }
+
+            .form-row {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 6px;
+                font-size: 12px;
+            }
+
+            .form-row:last-child {
+                margin-bottom: 0;
+            }
+
+            .form-label {
+                color: #94a3b8;
+            }
+
+            .form-value {
+                color: #e5e7eb;
+                font-family: 'JetBrains Mono', monospace;
+            }
+
+            .form-value.highlight {
+                color: #60a5fa;
+                font-weight: 600;
+            }
+
+            .form-value.success {
+                color: #22c55e;
+                font-weight: 600;
+            }
+
+            /* ── Main Content ── */
+            .main-content {
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                padding: 20px 24px;
+                overflow-y: auto;
+            }
+
+            .content-row {
+                display: flex;
+                gap: 16px;
+                margin-bottom: 16px;
+            }
+
+            .content-row > * {
+                flex: 1;
+            }
+
+            /* ── Inputs ── */
+            input[type="text"], select {
+                width: 100%;
+                padding: 8px 12px;
+                border: 1px solid #334155;
+                border-radius: 6px;
+                background-color: #0f172a;
+                color: #e5e7eb;
+                font-size: 13px;
+                font-family: inherit;
+            }
+
+            input[type="text"]:focus, select:focus {
+                outline: none;
+                border-color: #60a5fa;
+            }
+
             input[type="file"] {
                 display: none;
             }
+
+            /* ── Buttons ── */
             button {
-                margin-top: 18px;
-                width: 100%;
-                padding: 10px 16px;
-                border-radius: 999px;
-                border: none;
-                background: linear-gradient(135deg, #22c55e, #16a34a);
-                color: white;
+                padding: 8px 16px;
+                border-radius: 6px;
+                border: 1px solid #334155;
+                background-color: #1e293b;
+                color: #e5e7eb;
                 font-weight: 600;
-                font-size: 15px;
+                font-size: 13px;
                 cursor: pointer;
-                box-shadow: 0 12px 30px rgba(22,163,74,0.45);
-                transition: transform 0.08s ease, box-shadow 0.08s ease, filter 0.1s ease;
+                transition: all 0.15s ease;
             }
+
             button:hover {
-                filter: brightness(1.05);
-                box-shadow: 0 16px 40px rgba(22,163,74,0.6);
+                background-color: #334155;
+                border-color: #60a5fa;
             }
-            button:active {
-                transform: translateY(1px);
-                box-shadow: 0 10px 22px rgba(22,163,74,0.45);
-            }
+
             button:disabled {
                 opacity: 0.6;
                 cursor: not-allowed;
-                box-shadow: none;
             }
-            .status {
-                margin-top: 14px;
+
+            button.primary {
+                background: linear-gradient(135deg, #22c55e, #16a34a);
+                border: none;
+                color: white;
+            }
+
+            button.primary:hover {
+                filter: brightness(1.1);
+            }
+
+            button.secondary {
+                background-color: #1e293b;
+            }
+
+            button.danger {
+                background-color: #ef4444;
+                border-color: #ef4444;
+                color: white;
+            }
+
+            button.danger:hover {
+                background-color: #dc2626;
+            }
+
+            /* ── File Input ── */
+            .file-input-row {
+                display: flex;
+                gap: 8px;
+            }
+
+            .file-input-row input[type="text"] {
+                flex: 1;
+            }
+
+            /* ── Dropzone ── */
+            .dropzone {
+                border: 2px dashed #334155;
+                border-radius: 8px;
+                padding: 40px 20px;
+                text-align: center;
+                cursor: pointer;
+                background-color: #0f172a;
+                transition: all 0.15s ease;
+                color: #64748b;
                 font-size: 13px;
-                color: #9ca3af;
             }
-            .status strong {
-                color: #e5e7eb;
+
+            .dropzone:hover {
+                border-color: #60a5fa;
+                color: #94a3b8;
             }
-            .results {
-                margin-top: 16px;
-                padding-top: 12px;
-                border-top: 1px solid rgba(55, 65, 81, 0.9);
-                font-size: 13px;
+
+            .dropzone.dragover {
+                border-color: #22c55e;
+                background-color: rgba(34, 197, 94, 0.1);
             }
-            .results a {
-                color: #22c55e;
-                text-decoration: none;
-            }
-            .results a:hover {
-                text-decoration: underline;
-            }
-            .preview {
-                margin-top: 14px;
-            }
-            .preview-label {
-                font-size: 11px;
-                text-transform: uppercase;
-                letter-spacing: 0.06em;
-                color: #6b7280;
-            }
-            .preview img {
-                display: block;
-                margin-top: 6px;
-                max-width: 100%;
-                max-height: 260px;
-                border-radius: 12px;
-                border: 1px solid rgba(55,65,81,0.8);
-                object-fit: contain;
-                background: radial-gradient(circle at top, #020617, #020617);
-            }
-            .badge {
-                display: inline-flex;
+
+            /* ── Preview ── */
+            .preview-container {
+                min-height: 180px;
+                border: 2px dashed #334155;
+                border-radius: 8px;
+                display: flex;
                 align-items: center;
-                gap: 6px;
-                padding: 3px 10px;
-                border-radius: 999px;
-                background: rgba(15,23,42,1);
-                border: 1px solid rgba(55,65,81,0.9);
-                font-size: 11px;
-                color: #9ca3af;
+                justify-content: center;
+                color: #64748b;
+                font-size: 12px;
+                overflow: hidden;
+            }
+
+            .preview-container img {
+                max-width: 100%;
+                max-height: 200px;
+                object-fit: contain;
+            }
+
+            /* ── Progress Section ── */
+            .progress-bar-container {
                 margin-bottom: 10px;
             }
-            .badge-dot {
-                width: 7px;
-                height: 7px;
-                border-radius: 999px;
-                background: #22c55e;
-                box-shadow: 0 0 0 4px rgba(34,197,94,0.35);
+
+            .progress-bar {
+                width: 100%;
+                height: 28px;
+                background-color: #1e293b;
+                border: 1px solid #334155;
+                border-radius: 8px;
+                overflow: hidden;
+                position: relative;
             }
-            /* New styles for processing options */
-            .processing-options {
-                margin-top: 16px;
-                padding: 16px;
-                background: rgba(15,23,42,0.8);
-                border-radius: 12px;
-                border: 1px solid rgba(55,65,81,0.5);
+
+            .progress-fill {
+                height: 100%;
+                background: linear-gradient(90deg, #06b6d4, #3b82f6, #8b5cf6, #ec4899, #f59e0b, #10b981);
+                background-size: 200% 100%;
+                border-radius: 8px;
+                transition: width 0.3s ease;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: white;
+                font-weight: bold;
+                font-size: 13px;
             }
+
+            .task-container {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                margin-bottom: 10px;
+            }
+
+            .task-icon {
+                font-size: 20px;
+                width: 28px;
+                text-align: center;
+            }
+
+            .task-message {
+                flex: 1;
+                background-color: #1e293b;
+                border-radius: 6px;
+                padding: 8px 12px;
+                color: #e5e7eb;
+                font-size: 13px;
+                font-weight: 500;
+            }
+
+            .time-row {
+                display: flex;
+                justify-content: space-between;
+                font-size: 11px;
+                color: #64748b;
+                font-family: 'JetBrains Mono', monospace;
+            }
+
+            .status-text {
+                color: #60a5fa;
+                font-size: 12px;
+                font-weight: 600;
+                margin-top: 8px;
+            }
+
+            /* ── Output Section ── */
+            .output-grid {
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 12px;
+            }
+
+            .output-card {
+                background-color: #0f172a;
+                border-radius: 6px;
+                padding: 10px;
+            }
+
+            .output-header {
+                color: #60a5fa;
+                font-size: 12px;
+                font-weight: 700;
+                margin-bottom: 6px;
+            }
+
+            .output-path {
+                color: #64748b;
+                font-size: 10px;
+                font-family: 'JetBrains Mono', monospace;
+                margin-bottom: 8px;
+                word-break: break-all;
+            }
+
+            .output-buttons {
+                display: flex;
+                gap: 6px;
+            }
+
+            .output-buttons button {
+                flex: 1;
+                padding: 4px 8px;
+                font-size: 10px;
+            }
+
+            /* ── Activity Log ── */
+            .activity-log-container {
+                max-height: 180px;
+                overflow-y: auto;
+                background-color: #0f172a;
+                border-radius: 4px;
+                padding: 8px;
+            }
+
+            .activity-log-container::-webkit-scrollbar {
+                width: 6px;
+            }
+
+            .activity-log-container::-webkit-scrollbar-track {
+                background: transparent;
+            }
+
+            .activity-log-container::-webkit-scrollbar-thumb {
+                background: rgba(55, 65, 81, 0.6);
+                border-radius: 3px;
+            }
+
+            .log-entry {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding: 6px 0;
+                border-bottom: 1px solid rgba(55, 65, 81, 0.3);
+                animation: fadeInSlide 0.3s ease-out;
+            }
+
+            .log-entry:last-child {
+                border-bottom: none;
+            }
+
+            .log-icon {
+                font-size: 14px;
+                width: 24px;
+                text-align: center;
+            }
+
+            .log-timestamp {
+                color: #64748b;
+                font-size: 10px;
+                font-family: 'JetBrains Mono', monospace;
+                min-width: 40px;
+            }
+
+            .log-message {
+                color: #e5e7eb;
+                font-size: 11px;
+                flex: 1;
+            }
+
+            @keyframes fadeInSlide {
+                from { opacity: 0; transform: translateX(-10px); }
+                to { opacity: 1; transform: translateX(0); }
+            }
+
+            /* ── Action Buttons ── */
+            .action-buttons {
+                display: flex;
+                justify-content: center;
+                gap: 12px;
+                margin-top: auto;
+                padding-top: 16px;
+            }
+
+            .action-buttons button {
+                min-width: 120px;
+            }
+
+            .action-buttons button.primary {
+                min-width: 180px;
+                min-height: 40px;
+                font-size: 14px;
+            }
+
+            /* ── Radio Buttons ── */
+            .radio-group {
+                display: flex;
+                gap: 16px;
+            }
+
+            .radio-option {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+            }
+
+            input[type="radio"] {
+                accent-color: #3b82f6;
+            }
+
+            /* ── API Options ── */
+            .api-options {
+                display: none;
+                margin-top: 12px;
+                padding-top: 12px;
+                border-top: 1px solid #334155;
+            }
+
+            .api-options.active {
+                display: block;
+            }
+
             .option-group {
                 margin-bottom: 12px;
             }
+
             .option-group:last-child {
                 margin-bottom: 0;
             }
+
             .option-label {
                 display: block;
                 margin-bottom: 6px;
@@ -250,1207 +568,788 @@ def _main_app_html():
                 font-weight: 500;
                 color: #e5e7eb;
             }
-            .radio-group {
-                display: flex;
-                gap: 16px;
-                margin-bottom: 8px;
-            }
-            .radio-option {
-                display: flex;
-                align-items: center;
-                gap: 6px;
-            }
-            input[type="radio"] {
-                accent-color: #22c55e;
-            }
-            select, input[type="text"] {
-                width: 100%;
-                padding: 8px 12px;
-                border: 1px solid rgba(55,65,81,0.8);
-                border-radius: 8px;
-                background: rgba(15,23,42,0.9);
-                color: #e5e7eb;
-                font-size: 13px;
-            }
-            select:focus, input[type="text"]:focus {
-                outline: none;
-                border-color: #22c55e;
-                box-shadow: 0 0 0 2px rgba(34,197,94,0.2);
-            }
-            .api-options {
-                display: none;
-                margin-top: 12px;
-                padding-top: 12px;
-                border-top: 1px solid rgba(55,65,81,0.5);
-            }
-            .api-options.active {
-                display: block;
-            }
-            .local-options {
-                margin-top: 8px;
-            }
-            .local-options .option-group {
-                margin-bottom: 0;
-            }
-            .download-links {
-                margin-top: 8px;
-                display: flex;
-                flex-wrap: wrap;
-                gap: 10px;
-            }
-            .download-links a {
-                display: inline-block;
-                padding: 6px 12px;
-                border-radius: 8px;
-                background: rgba(34,197,94,0.2);
-                color: #22c55e;
-                text-decoration: none;
-                font-size: 13px;
-            }
-            .download-links a:hover {
-                background: rgba(34,197,94,0.35);
-            }
+
             .model-info {
                 margin-top: 8px;
                 padding: 8px 12px;
-                background: rgba(21,128,61,0.1);
-                border-left: 3px solid #22c55e;
+                background: rgba(59, 130, 246, 0.1);
+                border-left: 3px solid #3b82f6;
                 border-radius: 4px;
                 font-size: 12px;
-                color: #a7f3d0;
+                color: #93c5fd;
             }
+
             .balance-box {
                 margin-top: 8px;
                 padding: 8px 12px;
                 border-radius: 4px;
                 font-size: 12px;
-                border-left: 3px solid rgba(148,163,184,0.6);
-                background: rgba(30,41,59,0.6);
+                border-left: 3px solid rgba(148, 163, 184, 0.6);
+                background: rgba(30, 41, 59, 0.6);
                 color: #cbd5f5;
             }
+
             .balance-ok {
                 border-left-color: #22c55e;
-                background: rgba(21,128,61,0.15);
+                background: rgba(21, 128, 61, 0.15);
                 color: #a7f3d0;
             }
+
             .balance-warn {
                 border-left-color: #f59e0b;
                 background: rgba(251, 191, 36, 0.12);
                 color: #fcd34d;
             }
+
             .balance-error {
                 border-left-color: #ef4444;
                 background: rgba(127, 29, 29, 0.2);
                 color: #fecdd3;
             }
+
+            /* ── Warning & Error Boxes ── */
             .warning-box {
-                margin-top: 10px;
-                padding: 8px 12px;
-                background: rgba(251, 191, 36, 0.12);
-                border-left: 3px solid #f59e0b;
-                border-radius: 4px;
-                font-size: 12px;
-                color: #fcd34d;
-            }
-            .error-box {
-                margin-top: 10px;
-                padding: 8px 12px;
-                background: rgba(127, 29, 29, 0.2);
-                border-left: 3px solid #ef4444;
-                border-radius: 4px;
-                font-size: 12px;
-                color: #fecdd3;
-            }
-            .system-panel {
-                margin-top: 16px;
-                padding: 14px;
-                border-radius: 14px;
-                background: linear-gradient(135deg, rgba(15,23,42,0.95), rgba(2,6,23,0.85));
-                border: 1px solid rgba(55,65,81,0.7);
-                box-shadow: inset 0 0 0 1px rgba(148,163,184,0.06);
-            }
-            .system-title {
-                font-size: 12px;
-                text-transform: uppercase;
-                letter-spacing: 0.08em;
-                color: #94a3b8;
-                margin-bottom: 10px;
-            }
-            .system-grid {
-                display: grid;
-                grid-template-columns: repeat(2, minmax(0, 1fr));
-                gap: 10px;
-                font-size: 12px;
-                color: #cbd5f5;
-            }
-            .system-item {
-                background: rgba(15,23,42,0.7);
-                border: 1px solid rgba(55,65,81,0.6);
-                border-radius: 10px;
-                padding: 8px 10px;
-            }
-            .system-item span {
-                display: block;
-                font-size: 10px;
-                color: #94a3b8;
-                text-transform: uppercase;
-                letter-spacing: 0.06em;
-                margin-bottom: 4px;
-            }
-            .requirements {
-                margin-top: 10px;
-                font-size: 12px;
-                color: #9ca3af;
-                line-height: 1.4;
-            }
-            .progress-wrap {
-                margin-top: 14px;
-                padding: 10px 12px;
-                border-radius: 12px;
-                background: rgba(15,23,42,0.8);
-                border: 1px solid rgba(55,65,81,0.6);
-            }
-            .progress-bar {
-                width: 100%;
-                height: 8px;
-                border-radius: 999px;
-                background: rgba(30,41,59,0.9);
-                overflow: hidden;
-                margin: 8px 0 6px;
-            }
-            .progress-fill {
-                height: 100%;
-                width: 0%;
-                background: linear-gradient(90deg, #22c55e, #38bdf8);
-                box-shadow: 0 0 12px rgba(56,189,248,0.5);
-                transition: width 0.3s ease;
-            }
-            .progress-meta {
-                display: flex;
-                justify-content: space-between;
-                font-size: 12px;
-                color: #cbd5f5;
-            }
-            .activity-log {
-                margin-top: 10px;
-                max-height: 200px;
-                overflow-y: auto;
-                scrollbar-width: thin;
-                scrollbar-color: rgba(55,65,81,0.6) transparent;
-            }
-            .activity-log::-webkit-scrollbar {
-                width: 5px;
-            }
-            .activity-log::-webkit-scrollbar-track {
-                background: transparent;
-            }
-            .activity-log::-webkit-scrollbar-thumb {
-                background: rgba(55,65,81,0.6);
-                border-radius: 999px;
-            }
-            .activity-item {
-                display: flex;
-                align-items: flex-start;
-                gap: 8px;
-                padding: 6px 0;
-                border-bottom: 1px solid rgba(55,65,81,0.3);
-                font-size: 11px;
-                color: #94a3b8;
-                animation: fadeInSlide 0.3s ease-out;
-            }
-            .activity-item:last-child {
-                border-bottom: none;
-            }
-            .activity-item.active {
-                color: #e5e7eb;
-            }
-            .activity-item.active .activity-dot {
-                background: #38bdf8;
-                box-shadow: 0 0 6px rgba(56,189,248,0.6);
-                animation: pulse-dot 1.5s ease-in-out infinite;
-            }
-            .activity-item.completed .activity-dot {
-                background: #22c55e;
-                box-shadow: 0 0 4px rgba(34,197,94,0.4);
-            }
-            .activity-dot {
-                width: 6px;
-                height: 6px;
-                min-width: 6px;
-                border-radius: 50%;
-                background: #475569;
-                margin-top: 4px;
-                transition: all 0.3s ease;
-            }
-            .activity-ts {
-                font-size: 10px;
-                color: #64748b;
-                min-width: 42px;
-                font-variant-numeric: tabular-nums;
-            }
-            .activity-msg {
-                flex: 1;
-                line-height: 1.4;
-            }
-            .current-stage-label {
-                font-size: 11px;
-                color: #38bdf8;
-                font-weight: 500;
-                margin-top: 6px;
-                display: flex;
-                align-items: center;
-                gap: 6px;
-            }
-            .current-stage-label .spinner {
-                width: 12px;
-                height: 12px;
-                border: 2px solid rgba(56,189,248,0.25);
-                border-top-color: #38bdf8;
-                border-radius: 50%;
-                animation: spin 0.8s linear infinite;
-            }
-            @keyframes pulse-dot {
-                0%, 100% { opacity: 1; transform: scale(1); }
-                50% { opacity: 0.6; transform: scale(1.4); }
-            }
-            @keyframes fadeInSlide {
-                from { opacity: 0; transform: translateY(-4px); }
-                to { opacity: 1; transform: translateY(0); }
-            }
-            @keyframes spin {
-                to { transform: rotate(360deg); }
-            }
-            /* --- Warning & Error boxes --- */
-            .warning-box {
-                background: linear-gradient(135deg, rgba(251,191,36,0.15) 0%, rgba(245,158,11,0.10) 100%);
-                border: 1px solid rgba(251,191,36,0.45);
+                background: linear-gradient(135deg, rgba(251, 191, 36, 0.15), rgba(245, 158, 11, 0.1));
+                border: 1px solid rgba(251, 191, 36, 0.45);
                 border-left: 4px solid #f59e0b;
                 border-radius: 8px;
                 padding: 12px 14px;
                 margin: 10px 0;
                 color: #fbbf24;
                 font-size: 12px;
-                line-height: 1.5;
-                display: flex;
-                gap: 10px;
-                align-items: flex-start;
             }
-            .warning-box::before {
-                content: '\26A0';
-                font-size: 18px;
-                line-height: 1;
-                flex-shrink: 0;
-            }
-            .warning-box strong {
-                color: #fcd34d;
-            }
+
             .error-box {
-                background: linear-gradient(135deg, rgba(239,68,68,0.15) 0%, rgba(220,38,38,0.10) 100%);
-                border: 1px solid rgba(239,68,68,0.45);
+                background: linear-gradient(135deg, rgba(239, 68, 68, 0.15), rgba(220, 38, 38, 0.1));
+                border: 1px solid rgba(239, 68, 68, 0.45);
                 border-left: 4px solid #ef4444;
                 border-radius: 8px;
                 padding: 12px 14px;
                 margin: 10px 0;
                 color: #fca5a5;
                 font-size: 12px;
-                line-height: 1.5;
+            }
+
+            .download-links {
                 display: flex;
+                flex-wrap: wrap;
                 gap: 10px;
-                align-items: flex-start;
+                margin-top: 10px;
             }
-            .error-box::before {
-                content: '\2716';
-                font-size: 18px;
-                line-height: 1;
-                flex-shrink: 0;
-                color: #ef4444;
+
+            .download-links a {
+                display: inline-block;
+                padding: 6px 12px;
+                border-radius: 8px;
+                background: rgba(34, 197, 94, 0.2);
+                color: #22c55e;
+                text-decoration: none;
+                font-size: 13px;
             }
-            .error-box strong {
-                color: #fecaca;
+
+            .download-links a:hover {
+                background: rgba(34, 197, 94, 0.35);
             }
         </style>
     </head>
     <body>
-        <div class="card">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                <div class="badge">
-                    <span class="badge-dot"></span>
-                    <span>Image → 3D model pipeline</span>
-                </div>
-                <a href="/logout" style="color:#94a3b8; font-size:13px; text-decoration:none;">Log out</a>
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="logo-container">
+                <div class="logo">🎨 Image → 3D Pro</div>
+                <div class="version">v2.0.0</div>
             </div>
-            <h1>Image to 3D Converter</h1>
-            <p>Select a single image and generate downloadable 3D files (<code>.obj</code>, <code>.stl</code>, <code>.glb</code>).</p>
-            <p>Resolutions: 512³, 1024³, 1536³, and 1536³ Pro. Output Formats: OBJ, GLB, STL, FBX, USDZ.</p>
-            
-            <label class="dropzone" id="dropzone">
-                <input id="fileInput" type="file" accept="image/*" />
-                <div id="dropText">Click to choose an image or drop it here</div>
-            </label>
-            
-            <div class="preview" id="previewContainer" style="display:none;">
-                <div class="preview-label">Preview</div>
-                <img id="previewImage" alt="Selected image preview" />
-            </div>
-            
-            <!-- Processing Options -->
-            <div class="processing-options">
-                <div class="option-group">
-                    <label class="option-label">Processing Method</label>
-                    <div class="radio-group">
-                        <div class="radio-option">
-                            <input type="radio" id="local" name="processing" value="local" checked>
-                            <label for="local">Local Processing</label>
-                        </div>
-                        <div class="radio-option">
-                            <input type="radio" id="api" name="processing" value="api">
-                            <label for="api">Cloud API</label>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="local-options" id="localOptions">
-                    <div class="option-group">
-                        <label class="option-label" for="quality">Mesh quality (local)</label>
-                        <select id="quality">
-                            <option value="draft">Draft (fast)</option>
-                            <option value="standard" selected>Standard</option>
-                            <option value="high">High</option>
-                            <option value="production">Production</option>
-                        </select>
-                    </div>
-                </div>
-                
-                <div class="api-options" id="apiOptions">
-                    <div class="option-group">
-                        <label class="option-label" for="apiToken">API Token</label>
-                        <input type="text" id="apiToken" placeholder="Enter your Cloud API token">
-                    </div>
 
-                    <div class="option-group">
-                        <label class="option-label" for="serverApiToken">Server API Token (shared)</label>
-                        <input type="text" id="serverApiToken" placeholder="Paste token to save for all users">
-                        <button id="saveServerToken" type="button" style="margin-top:8px; width:100%;">Save Server Token</button>
-                    </div>
-                    
-                    <div class="option-group">
-                        <label class="option-label" for="apiModel">Model</label>
-                        <select id="apiModel">
-<option value="hitem3dv1.5">Standard v1.5</option>
-                            <option value="hitem3dv2.0">Standard v2.0</option>
-                            <option value="scene-portraitv1.5">Portrait v1.5</option>
-                            <option value="scene-portraitv2.0">Portrait v2.0</option>
-                            <option value="scene-portraitv2.1">Portrait v2.1</option>
-                        </select>
-                        <div class="model-info" id="modelInfo">
-                            General purpose 3D generation model. Recommended resolution: 1024
-                        </div>
-                    </div>
-                    
-                    <div class="option-group">
-                        <label class="option-label" for="apiResolution">Resolution</label>
-                        <select id="apiResolution">
-                            <option value="512">512³</option>
-                            <option value="1024" selected>1024³</option>
-                            <option value="1536">1536³</option>
-                            <option value="1536pro">1536³ Pro</option>
-                        </select>
-                    </div>
-
-                    <div class="option-group">
-                        <label class="option-label" for="apiFormat">Output Format</label>
-                        <select id="apiFormat">
-                            <option value="obj" selected>OBJ</option>
-                            <option value="glb">GLB</option>
-                            <option value="stl">STL</option>
-                            <option value="fbx">FBX</option>
-                            <option value="usdz">USDZ</option>
-                        </select>
-                    </div>
-                    
-                    <div class="option-group">
-                        <label class="option-label">Balance</label>
-                        <div class="balance-box" id="balanceInfo">Balance check not started.</div>
-                    </div>
+            <!-- Device Info -->
+            <div class="group-box" id="deviceBox">
+                <div class="group-box-title">🔒 Device</div>
+                <div class="form-row">
+                    <span class="form-label">ID:</span>
+                    <span class="form-value highlight" id="deviceId">--</span>
+                </div>
+                <div class="form-row">
+                    <span class="form-label">Host:</span>
+                    <span class="form-value" id="deviceHost">--</span>
+                </div>
+                <div class="form-row">
+                    <span class="form-label">Status:</span>
+                    <span class="form-value success">✓ Secured</span>
                 </div>
             </div>
 
-            <div class="system-panel" id="systemPanel">
-                <div class="system-title">System & Requirements</div>
-                <div class="system-grid">
-                    <div class="system-item"><span>Available RAM</span><div id="sysAvailable">--</div></div>
-                    <div class="system-item"><span>Total RAM</span><div id="sysTotal">--</div></div>
-                    <div class="system-item"><span>Required RAM</span><div id="sysRequired">--</div></div>
-                    <div class="system-item"><span>CPU Cores</span><div id="sysCpu">--</div></div>
-                    <div class="system-item"><span>Platform</span><div id="sysPlatform">--</div></div>
-                    <div class="system-item"><span>Mode</span><div id="sysMode">Local</div></div>
+            <!-- System Panel -->
+            <div class="group-box">
+                <div class="group-box-title">⚙️ System</div>
+                <div class="form-row">
+                    <span class="form-label">RAM:</span>
+                    <span class="form-value" id="sysRam">-- / --</span>
                 </div>
-                <div class="requirements" id="requirementsText">
-                    Local processing runs TripoSR on CPU and bakes a simple texture map from the input image (not full PBR materials). Keep at least 6GB RAM available for stable results.
+                <div class="form-row">
+                    <span class="form-label">CPU:</span>
+                    <span class="form-value" id="sysCpu">--</span>
                 </div>
-                <div class="progress-wrap" id="progressSection" style="display:none;">
-                    <div style="font-size:12px; color:#e5e7eb;">Processing progress</div>
-                    <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
-                    <div class="progress-meta">
-                        <div id="progressPercent">0%</div>
-                        <div id="progressEta">ETA --:--</div>
-                        <div id="progressElapsed">Elapsed 00:00</div>
-                    </div>
-                    <div class="current-stage-label" id="currentStageLabel" style="display:none;">
-                        <div class="spinner"></div>
-                        <span id="currentStageText">Initializing...</span>
-                    </div>
-                    <div class="activity-log" id="activityLog"></div>
+                <div class="form-row">
+                    <span class="form-label">Platform:</span>
+                    <span class="form-value" id="sysPlatform" style="font-size: 10px;">--</span>
+                </div>
+                <div class="form-row">
+                    <span class="form-label">Mode:</span>
+                    <span class="form-value success" id="sysMode">Local</span>
                 </div>
             </div>
-            
-            <button id="generateBtn" disabled>Choose an image to start</button>
-            <div class="status" id="status"></div>
-            <div class="results" id="results"></div>
-        </div>
+
+            <div style="margin-top: auto;">
+                <button class="secondary" onclick="logout()" style="width: 100%; margin-bottom: 8px;">🔒 Log Out</button>
+                <button class="danger" onclick="quitApp()" style="width: 100%;">✕ Quit</button>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Row 1: Source + Processing Options -->
+            <div class="content-row">
+                <!-- Source Section -->
+                <div class="group-box" style="flex: 1;">
+                    <div class="group-box-title">📷 Source</div>
+                    <div class="file-input-row">
+                        <input type="text" id="filePath" placeholder="Select image file..." readonly />
+                        <button onclick="document.getElementById('fileInput').click()">Browse…</button>
+                    </div>
+                    <input type="file" id="fileInput" accept="image/*" />
+                </div>
+
+                <!-- Processing Options -->
+                <div class="group-box" style="flex: 2;">
+                    <div class="group-box-title">⚙️ Processing</div>
+                    
+                    <div class="option-group">
+                        <label class="option-label">Method</label>
+                        <div class="radio-group">
+                            <div class="radio-option">
+                                <input type="radio" id="local" name="processing" value="local" checked>
+                                <label for="local">Local Processing</label>
+                            </div>
+                            <div class="radio-option">
+                                <input type="radio" id="api" name="processing" value="api">
+                                <label for="api">Cloud API</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="localOptions">
+                        <div class="option-group">
+                            <label class="option-label" for="quality">Quality</label>
+                            <select id="quality">
+                                <option value="draft">Draft</option>
+                                <option value="standard" selected>Standard</option>
+                                <option value="high">High</option>
+                                <option value="production">Production</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="api-options" id="apiOptions">
+                        <div class="option-group">
+                            <label class="option-label" for="apiToken">API Token</label>
+                            <input type="text" id="apiToken" placeholder="Enter your Cloud API token">
+                        </div>
+
+                        <div class="option-group">
+                            <label class="option-label" for="apiModel">Model</label>
+                            <select id="apiModel">
+                                <option value="hitem3dv1.5">Standard v1.5</option>
+                                <option value="hitem3dv2.0">Standard v2.0</option>
+                                <option value="scene-portraitv1.5">Portrait v1.5</option>
+                                <option value="scene-portraitv2.0">Portrait v2.0</option>
+                                <option value="scene-portraitv2.1">Portrait v2.1</option>
+                            </select>
+                            <div class="model-info" id="modelInfo">
+                                General purpose 3D generation model. Recommended resolution: 1024
+                            </div>
+                        </div>
+
+                        <div class="option-group">
+                            <label class="option-label" for="apiResolution">Resolution</label>
+                            <select id="apiResolution">
+                                <option value="512">512³</option>
+                                <option value="1024" selected>1024³</option>
+                                <option value="1536">1536³</option>
+                                <option value="1536pro">1536³ Pro</option>
+                            </select>
+                        </div>
+
+                        <div class="option-group">
+                            <label class="option-label" for="apiFormat">Output Format</label>
+                            <select id="apiFormat">
+                                <option value="obj" selected>OBJ</option>
+                                <option value="glb">GLB</option>
+                                <option value="stl">STL</option>
+                                <option value="fbx">FBX</option>
+                                <option value="usdz">USDZ</option>
+                            </select>
+                        </div>
+
+                        <div class="option-group">
+                            <label class="option-label">Balance</label>
+                            <div class="balance-box" id="balanceInfo">Enter token to check balance</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Row 2: Preview + Progress -->
+            <div class="content-row">
+                <!-- Preview Section -->
+                <div class="group-box" style="flex: 1;">
+                    <div class="group-box-title">🖼️ Preview</div>
+                    <div class="preview-container" id="previewContainer">
+                        <span>No image selected</span>
+                    </div>
+                </div>
+
+                <!-- Progress Section -->
+                <div class="group-box" style="flex: 1;">
+                    <div class="group-box-title">📊 Progress</div>
+                    
+                    <div class="progress-bar-container">
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progressFill" style="width: 0%;">0%</div>
+                        </div>
+                    </div>
+
+                    <div class="task-container">
+                        <div class="task-icon" id="taskIcon">⏳</div>
+                        <div class="task-message" id="taskMessage">Ready</div>
+                    </div>
+
+                    <div class="time-row">
+                        <span id="elapsedTime">Elapsed: --:--</span>
+                        <span id="etaTime">ETA: --:--</span>
+                    </div>
+
+                    <div class="status-text" id="statusText"></div>
+                </div>
+            </div>
+
+            <!-- Row 3: Outputs -->
+            <div class="group-box">
+                <div class="group-box-title">📦 Outputs</div>
+                <div class="output-grid">
+                    <div class="output-card">
+                        <div class="output-header">OBJ</div>
+                        <div class="output-path" id="objPath">—</div>
+                        <div class="output-buttons">
+                            <button onclick="openOutput('obj')">Open</button>
+                            <button onclick="saveOutput('obj')">Save</button>
+                        </div>
+                    </div>
+                    <div class="output-card">
+                        <div class="output-header">STL</div>
+                        <div class="output-path" id="stlPath">—</div>
+                        <div class="output-buttons">
+                            <button onclick="openOutput('stl')">Open</button>
+                            <button onclick="saveOutput('stl')">Save</button>
+                        </div>
+                    </div>
+                    <div class="output-card">
+                        <div class="output-header">GLB</div>
+                        <div class="output-path" id="glbPath">—</div>
+                        <div class="output-buttons">
+                            <button onclick="openOutput('glb')">Open</button>
+                            <button onclick="saveOutput('glb')">Save</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Row 4: Activity Log -->
+            <div class="group-box">
+                <div class="group-box-title">📋 Activity Log</div>
+                <div class="activity-log-container" id="activityLog">
+                    <!-- Log entries will be added here -->
+                </div>
+            </div>
+
+            <!-- Row 5: Action Buttons -->
+            <div class="action-buttons">
+                <button class="secondary" onclick="resetUI()">🔄 Reset</button>
+                <button class="secondary" onclick="openOutputFolder()">📂 Open Folder</button>
+                <button class="primary" id="generateBtn" onclick="startGeneration()" disabled>🚀 Generate 3D Model</button>
+            </div>
+
+            <!-- Results Container -->
+            <div id="resultsContainer"></div>
+        </main>
 
         <script>
-            const fileInput = document.getElementById('fileInput');
-            const dropzone = document.getElementById('dropzone');
-            const dropText = document.getElementById('dropText');
-            const btn = document.getElementById('generateBtn');
-            const statusEl = document.getElementById('status');
-            const resultsEl = document.getElementById('results');
-            const previewContainer = document.getElementById('previewContainer');
-            const previewImage = document.getElementById('previewImage');
-            const processingRadios = document.querySelectorAll('input[name="processing"]');
-            const apiOptions = document.getElementById('apiOptions');
-            const apiModel = document.getElementById('apiModel');
-            const modelInfo = document.getElementById('modelInfo');
-            const apiToken = document.getElementById('apiToken');
-            const serverApiToken = document.getElementById('serverApiToken');
-            const saveServerToken = document.getElementById('saveServerToken');
-            const apiResolution = document.getElementById('apiResolution');
-            const apiFormat = document.getElementById('apiFormat');
-            const balanceInfo = document.getElementById('balanceInfo');
-            const sysAvailable = document.getElementById('sysAvailable');
-            const sysTotal = document.getElementById('sysTotal');
-            const sysRequired = document.getElementById('sysRequired');
-            const sysCpu = document.getElementById('sysCpu');
-            const sysPlatform = document.getElementById('sysPlatform');
-            const sysMode = document.getElementById('sysMode');
-            const requirementsText = document.getElementById('requirementsText');
-            const progressSection = document.getElementById('progressSection');
-            const progressFill = document.getElementById('progressFill');
-            const progressPercent = document.getElementById('progressPercent');
-            const progressEta = document.getElementById('progressEta');
-            const progressElapsed = document.getElementById('progressElapsed');
-            const currentStageLabel = document.getElementById('currentStageLabel');
-            const currentStageText = document.getElementById('currentStageText');
-            const activityLog = document.getElementById('activityLog');
-            let serverHasCredentials = false;
-            let lastTotalSeconds = null;
+            // State
+            let selectedFile = null;
+            let jobId = null;
             let progressTimer = null;
-            let progressStart = null;
-            let progressExpected = null;
-            let lastSystemInfo = null;
-            let lastRenderedLogCount = 0;
-            let backendPercent = null;  // set from poll data
-            
-            let previewUrl = null;
+            let startTime = null;
+            let logEntries = [];
+            let logStartTime = null;
+            let outputs = {};
 
-            // Model information
-            const modelDescriptions = {
+            // Model info
+            const modelInfo = {
                 'hitem3dv1.5': {
-                    description: 'General purpose 3D generation model. Recommended resolution: 1024',
+                    desc: 'General purpose 3D generation model. Recommended resolution: 1024',
                     resolutions: ['512', '1024', '1536', '1536pro']
                 },
                 'hitem3dv2.0': {
-                    description: 'Enhanced 3D generation model with better quality. Recommended resolution: 1536',
+                    desc: 'Enhanced 3D generation model with better quality. Recommended resolution: 1536',
                     resolutions: ['1536', '1536pro']
                 },
                 'scene-portraitv1.5': {
-                    description: 'Specialized portrait model. Recommended resolution: 1536',
+                    desc: 'Specialized portrait model. Recommended resolution: 1536',
                     resolutions: ['1536']
                 },
                 'scene-portraitv2.0': {
-                    description: 'Specialized portrait model. Recommended resolution: 1536pro',
+                    desc: 'Specialized portrait model. Recommended resolution: 1536pro',
                     resolutions: ['1536pro']
                 },
                 'scene-portraitv2.1': {
-                    description: 'Specialized portrait model. Recommended resolution: 1536pro',
+                    desc: 'Specialized portrait model. Recommended resolution: 1536pro',
                     resolutions: ['1536pro']
                 }
             };
-            const creditCosts = {
-                'hitem3dv1.5': { '512': 15, '1024': 20, '1536': 50, '1536pro': 70 },
-                'hitem3dv2.0': { '1536': 75, '1536pro': 90 },
-                'scene-portraitv1.5': { '1536': 70 },
-                'scene-portraitv2.0': { '1536pro': 70 },
-                'scene-portraitv2.1': { '1536pro': 70 }
-            };
-            let balanceState = { available: null, required: null, error: null, updatedAt: null };
-            let balanceFetchTimer = null;
 
-            function setStatus(text) {
-                statusEl.textContent = text || '';
-            }
-
-            function updateApiTokenPlaceholder() {
-                apiToken.placeholder = serverHasCredentials ? 'Using server credentials (optional)' : 'Enter your Cloud API token';
-            }
-
-            function formatCredits(value) {
-                if (typeof value !== 'number' || Number.isNaN(value)) {
-                    return '--';
-                }
-                return Number.isInteger(value) ? String(value) : value.toFixed(2);
-            }
-
-            function getRequiredCredits() {
-                const modelCosts = creditCosts[apiModel.value];
-                if (!modelCosts) return null;
-                const value = modelCosts[apiResolution.value];
-                return typeof value === 'number' ? value : null;
-            }
-
-            function setBalanceBox(message, stateClass) {
-                balanceInfo.textContent = message || '';
-                balanceInfo.classList.remove('balance-ok', 'balance-warn', 'balance-error');
-                if (stateClass) {
-                    balanceInfo.classList.add(stateClass);
-                }
-            }
-
-            function updateBalanceInfo() {
-                const useApi = document.querySelector('input[name="processing"]:checked').value === 'api';
-                if (!useApi) {
-                    setBalanceBox('Balance check is available for Cloud API.', '');
-                    return;
-                }
-                const required = getRequiredCredits();
-                balanceState.required = required;
-                if (balanceState.error) {
-                    setBalanceBox(balanceState.error, 'balance-error');
-                    return;
-                }
-                if (balanceState.available === null || balanceState.available === undefined) {
-                    if (required !== null) {
-                        setBalanceBox(`Balance unavailable. Requires ${formatCredits(required)} credits.`, 'balance-warn');
-                    } else {
-                        setBalanceBox('Balance unavailable.', 'balance-warn');
-                    }
-                    return;
-                }
-                const availableText = formatCredits(balanceState.available);
-                if (required === null) {
-                    setBalanceBox(`Balance: ${availableText} credits.`, 'balance-ok');
-                    return;
-                }
-                if (balanceState.available >= required) {
-                    setBalanceBox(`Balance: ${availableText} credits (needs ${formatCredits(required)}).`, 'balance-ok');
-                } else {
-                    setBalanceBox(`Insufficient balance: ${availableText} credits (needs ${formatCredits(required)}).`, 'balance-error');
-                }
-            }
-
-            function scheduleBalanceFetch() {
-                if (balanceFetchTimer) {
-                    clearTimeout(balanceFetchTimer);
-                }
-                balanceFetchTimer = setTimeout(fetchBalance, 600);
-            }
-
-            async function fetchBalance() {
-                const useApi = document.querySelector('input[name="processing"]:checked').value === 'api';
-                if (!useApi) return;
-                const token = apiToken.value.trim();
-                if (!serverHasCredentials && !token) {
-                    balanceState.available = null;
-                    balanceState.error = 'Add a valid API token to check balance.';
-                    updateBalanceInfo();
-                    return;
-                }
-                balanceState.error = null;
-                setBalanceBox('Checking balance...', '');
-                try {
-                    const payload = new URLSearchParams();
-                    if (token) {
-                        payload.append('api_token', token);
-                    }
-                    const resp = await fetch('/hitem3d/balance', {
-                        method: 'POST',
-                        credentials: 'same-origin',
-                        body: payload
-                    });
-                    if (!resp.ok) {
-                        const error = await readResponseJson(resp);
-                        const detail = error && (error.detail || error.error || error.error_message);
-                        throw new Error(detail || `Server returned ${resp.status}`);
-                    }
-                    const data = await readResponseJson(resp) || {};
-                    balanceState.available = typeof data.available === 'number' ? data.available : null;
-                    balanceState.updatedAt = Date.now();
-                } catch (err) {
-                    const message = err && err.message ? err.message : 'Balance check failed.';
-                    balanceState.available = null;
-                    balanceState.error = `Balance check failed: ${message}`;
-                }
-                updateBalanceInfo();
-            }
-
-            function formatTime(totalSeconds) {
-                const seconds = Math.max(0, Math.round(totalSeconds || 0));
-                const minutes = Math.floor(seconds / 60);
-                const rem = seconds % 60;
-                return `${String(minutes).padStart(2, '0')}:${String(rem).padStart(2, '0')}`;
-            }
-
-            function updateProgress(elapsedSeconds) {
-                const expected = progressExpected || 0;
-                let percent;
-                if (backendPercent !== null && backendPercent > 0) {
-                    // Use real backend progress with slight smoothing
-                    percent = backendPercent;
-                } else {
-                    // Fallback to time-estimation until backend reports
-                    percent = expected > 0 ? (elapsedSeconds / expected) * 100 : 0;
-                    percent = Math.max(0, Math.min(95, percent));
-                }
-                progressFill.style.width = `${percent.toFixed(1)}%`;
-                progressPercent.textContent = `${percent.toFixed(1)}%`;
-                progressElapsed.textContent = `Elapsed ${formatTime(elapsedSeconds)}`;
-                const remaining = expected > 0 ? Math.max(0, expected - elapsedSeconds) : 0;
-                progressEta.textContent = `ETA ${formatTime(remaining)}`;
-            }
-
-            function startProgress(useApi) {
-                progressStart = Date.now();
-                progressExpected = lastTotalSeconds || (useApi ? 120 : 180);
-                progressSection.style.display = 'block';
-                backendPercent = null;
-                lastRenderedLogCount = 0;
-                activityLog.innerHTML = '';
-                currentStageLabel.style.display = 'flex';
-                currentStageText.textContent = 'Uploading and starting...';
-                updateProgress(0);
-                if (progressTimer) clearInterval(progressTimer);
-                progressTimer = setInterval(() => {
-                    const elapsed = (Date.now() - progressStart) / 1000;
-                    updateProgress(elapsed);
-                }, 500);
-            }
-
-            function stopProgress(success) {
-                if (progressTimer) {
-                    clearInterval(progressTimer);
-                    progressTimer = null;
-                }
-                if (success) {
-                    progressFill.style.width = '100%';
-                    progressPercent.textContent = '100%';
-                    progressEta.textContent = 'ETA 00:00';
-                    currentStageLabel.style.display = 'none';
-                } else {
-                    progressFill.style.width = '0%';
-                    progressPercent.textContent = '0%';
-                    progressEta.textContent = 'ETA --:--';
-                    currentStageLabel.style.display = 'none';
-                }
-                backendPercent = null;
-            }
-
-            // --- Activity log & stage rendering helpers ---
-            const stageIcons = {
-                'starting': '🚀',
-                'init': '⚙️',
-                'load_and_infer': '🧠',
-                'load_and_infer_done': '✅',
-                'cleanup': '🧹',
-                'advanced_processing': '🔧',
-                'advanced_processing_done': '✅',
-                'colorize': '🎨',
-                'export': '📦',
-                'done': '🎉'
+            // Log icons mapping
+            const logIcons = {
+                'starting': '🚀', 'start': '🚀', 'init': '⚙️',
+                'loading': '📥', 'load': '📥', 'preprocess': '🔧',
+                'processing': '⚡', 'model': '🤖', 'inference': '🤖',
+                'generate': '✨', 'generation': '✨', 'mesh': '📐',
+                'geometry': '📐', 'texture': '🎨', 'texturing': '🎨',
+                'material': '🎨', 'export': '💾', 'save': '💾',
+                'upload': '☁️', 'api': '☁️', 'complete': '✅',
+                'done': '✅', 'finish': '✅', 'success': '✅',
+                'error': '❌', 'fail': '❌', 'warning': '⚠️',
+                'warn': '⚠️', 'info': 'ℹ️', 'file': '📄', 'files': '📦'
             };
 
-            function renderActivityLog(logEntries, currentStage) {
-                if (!logEntries || logEntries.length === 0) return;
-                // Only render new entries for efficiency
-                const startIdx = lastRenderedLogCount;
-                if (startIdx >= logEntries.length) {
-                    // Just update active/completed states
-                    const items = activityLog.querySelectorAll('.activity-item');
-                    items.forEach(item => {
-                        const stage = item.dataset.stage;
-                        item.classList.remove('active');
-                        if (stage === currentStage) {
-                            item.classList.add('active');
-                        } else {
-                            item.classList.add('completed');
-                        }
-                    });
-                    return;
-                }
-                // Mark existing items as completed
-                const existingItems = activityLog.querySelectorAll('.activity-item');
-                existingItems.forEach(item => {
-                    item.classList.remove('active');
-                    item.classList.add('completed');
+            // Task icons
+            const taskIcons = {
+                'preprocess': '🔧', 'preprocessing': '🔧', 'loading': '📥',
+                'load': '📥', 'model': '🤖', 'inference': '🤖', 'predict': '🤖',
+                'generation': '✨', 'generate': '✨', 'mesh': '📐',
+                'geometry': '📐', 'texture': '🎨', 'texturing': '🎨',
+                'material': '🎨', 'export': '💾', 'save': '💾',
+                'upload': '☁️', 'api': '☁️', 'complete': '✅',
+                'done': '✅', 'finish': '✅'
+            };
+
+            // Initialize
+            document.addEventListener('DOMContentLoaded', () => {
+                updateSystemInfo();
+                setInterval(updateSystemInfo, 5000);
+                
+                // File input handler
+                document.getElementById('fileInput').addEventListener('change', handleFileSelect);
+                
+                // Processing method toggle
+                document.querySelectorAll('input[name="processing"]').forEach(radio => {
+                    radio.addEventListener('change', toggleProcessingMethod);
                 });
-                // Add new entries
-                for (let i = startIdx; i < logEntries.length; i++) {
-                    const entry = logEntries[i];
-                    const icon = stageIcons[entry.stage] || '📋';
-                    const isLast = (i === logEntries.length - 1);
-                    const elapsed = progressStart ? ((entry.ts * 1000 - progressStart) / 1000) : 0;
-                    const tsStr = formatTime(Math.max(0, elapsed));
-                    const div = document.createElement('div');
-                    div.className = 'activity-item' + (isLast ? ' active' : ' completed');
-                    div.dataset.stage = entry.stage;
-                    div.innerHTML = `<div class="activity-dot"></div><span class="activity-ts">${tsStr}</span><span class="activity-msg">${icon} ${entry.msg}</span>`;
-                    activityLog.appendChild(div);
-                }
-                lastRenderedLogCount = logEntries.length;
-                // Auto-scroll to bottom
-                activityLog.scrollTop = activityLog.scrollHeight;
-            }
-
-            function setResults(data) {
-                resultsEl.innerHTML = '';
-                if (!data) return;
-                const { obj, stl, glb, fbx, usdz, obj_url, stl_url, glb_url, fbx_url, usdz_url, stats, processing_method, api_model, api_format, quality, warning, system_info, error_message } = data;
-                const lines = [];
                 
-                if (error_message) {
-                    lines.push(`<div class="error-box"><div><strong>Error:</strong> ${error_message}</div></div>`);
-                }
-                if (processing_method) {
-                    lines.push(`<div><strong>Method:</strong> ${processing_method === 'local' ? 'Local Processing' : 'Cloud API'}</div>`);
-                }
-                if (api_model) {
-                    lines.push(`<div><strong>Model:</strong> ${api_model}</div>`);
-                }
-                if (api_format) {
-                    lines.push(`<div><strong>Format:</strong> ${api_format.toUpperCase()}</div>`);
-                }
-                if (quality) {
-                    lines.push(`<div><strong>Quality:</strong> ${quality}</div>`);
-                }
-                if (warning) {
-                    lines.push(`<div class="warning-box"><div><strong>Warning:</strong> ${warning}</div></div>`);
-                }
-                if (system_info && processing_method === 'local') {
-                    lines.push(
-                        `<div style="margin-top:8px;"><strong>System:</strong> ${system_info.platform || 'unknown'}</div>`
-                    );
-                    lines.push(
-                        `<div><strong>CPU:</strong> ${system_info.cpu_count || 'unknown'}</div>`
-                    );
-                    const total = system_info.ram_total_gb ?? 'unknown';
-                    const free = system_info.ram_available_gb ?? 'unknown';
-                    const req = system_info.ram_required_gb ?? 4;
-                    // Color-code RAM: green (safe >=8), amber (warning 4-8), red (risky <4)
-                    let ramColor = '#e5e7eb';
-                    let ramLabel = '';
-                    if (typeof free === 'number') {
-                        if (free >= 8) { ramColor = '#4ade80'; ramLabel = ' (Excellent)'; }
-                        else if (free >= 4) { ramColor = '#fbbf24'; ramLabel = ' (Moderate)'; }
-                        else { ramColor = '#f87171'; ramLabel = ' (Low - may fail)'; }
-                    }
-                    lines.push(
-                        `<div><strong>RAM:</strong> <span style="color:${ramColor};font-weight:600">${free}GB free${ramLabel}</span> / ${total}GB total (required ${req}GB)</div>`
-                    );
-                }
+                // Model change handler
+                document.getElementById('apiModel').addEventListener('change', updateModelInfo);
                 
-                if (obj) lines.push(`<div><strong>OBJ:</strong> <code>${obj}</code></div>`);
-                if (stl) lines.push(`<div><strong>STL:</strong> <code>${stl}</code></div>`);
-                if (glb) lines.push(`<div><strong>GLB:</strong> <code>${glb}</code></div>`);
-                if (fbx) lines.push(`<div><strong>FBX:</strong> <code>${fbx}</code></div>`);
-                if (usdz) lines.push(`<div><strong>USDZ:</strong> <code>${usdz}</code></div>`);
+                // API token change handler
+                document.getElementById('apiToken').addEventListener('input', scheduleBalanceCheck);
                 
-                const downloads = [];
-                if (obj_url) downloads.push(`<a href="${obj_url}" download>Download OBJ</a>`);
-                if (stl_url) downloads.push(`<a href="${stl_url}" download>Download STL</a>`);
-                if (glb_url) downloads.push(`<a href="${glb_url}" download>Download GLB</a>`);
-                if (fbx_url) downloads.push(`<a href="${fbx_url}" download>Download FBX</a>`);
-                if (usdz_url) downloads.push(`<a href="${usdz_url}" download>Download USDZ</a>`);
-                if (downloads.length) {
-                    lines.push('<div class="download-links">' + downloads.join('') + '</div>');
-                }
+                // Update resolution options based on model
+                updateResolutionOptions();
+            });
 
-                if (stats && typeof stats === 'object') {
-                    const total = typeof stats.total_seconds === 'number'
-                        ? stats.total_seconds.toFixed(3)
-                        : null;
-                    const stages = stats.stages && typeof stats.stages === 'object'
-                        ? stats.stages
-                        : null;
-
-                    if (total !== null) {
-                        lines.push(`<div style="margin-top:10px;"><strong>Total time:</strong> ${total}s</div>`);
-                        if (typeof stats.total_seconds === 'number') {
-                            lastTotalSeconds = Math.max(1, stats.total_seconds);
-                        }
-                    }
-                    if (stages) {
-                        lines.push('<div style="margin-top:4px;"><strong>Stages:</strong></div>');
-                        lines.push('<ul style="margin:4px 0 0 16px; padding:0; font-size:12px;">' +
-                            Object.entries(stages)
-                                .map(([k, v]) => {
-                                    const val = typeof v === 'number' ? v.toFixed(3) : v;
-                                    return `<li>${k}: ${val}s</li>`;
-                                }).join('') +
-                            '</ul>');
-                    }
-                }
-
-                resultsEl.innerHTML = lines.join('');
+            function updateSystemInfo() {
+                fetch('/system-info')
+                    .then(r => r.json())
+                    .then(data => {
+                        document.getElementById('deviceId').textContent = data.device_id || '--';
+                        document.getElementById('deviceHost').textContent = data.hostname || '--';
+                        document.getElementById('sysRam').textContent = 
+                            `${data.ram_available_gb?.toFixed(2) || '--'} / ${data.ram_total_gb?.toFixed(2) || '--'} GB`;
+                        document.getElementById('sysCpu').textContent = data.cpu_count || '--';
+                        document.getElementById('sysPlatform').textContent = 
+                            `${data.platform || '--'} ${data.release || ''}`;
+                    })
+                    .catch(() => {});
             }
 
-            async function readResponseJson(resp) {
-                const text = await resp.text();
-                if (!text) return null;
-                try {
-                    return JSON.parse(text);
-                } catch (e) {
-                    return { error_message: text };
-                }
+            function handleFileSelect(e) {
+                const file = e.target.files[0];
+                if (!file) return;
+                
+                selectedFile = file;
+                document.getElementById('filePath').value = file.name;
+                
+                // Show preview
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const container = document.getElementById('previewContainer');
+                    container.innerHTML = `<img src="${e.target.result}" alt="Preview" />`;
+                };
+                reader.readAsDataURL(file);
+                
+                document.getElementById('generateBtn').disabled = false;
+                addLogEntry(`📷 Selected: ${file.name}`);
             }
 
-            function handleResult(data) {
-                const errorMsg = data.error_message || data.error || '';
-                if (errorMsg) {
-                    setStatus(`Error: ${errorMsg}`);
-                    if (!data.error_message) {
-                        data.error_message = errorMsg;
-                    }
-                    stopProgress(false);
-                } else {
-                    setStatus('Done! 3D files generated successfully.');
-                    stopProgress(true);
-                }
-                setResults(data);
-            }
-
-            function sleep(ms) {
-                return new Promise(resolve => setTimeout(resolve, ms));
-            }
-
-            async function pollJob(jobId, useApi) {
-                let attempts = 0;
-                while (true) {
-                    await sleep(2000);
-                    attempts += 1;
-                    const resp = await fetch(`/job/${jobId}`, {
-                        credentials: 'same-origin'
-                    });
-                    if (!resp.ok) {
-                        const error = await readResponseJson(resp);
-                        const detail = error && (error.detail || error.error || error.error_message);
-                        throw new Error(detail || `Server returned ${resp.status}`);
-                    }
-                    const data = await readResponseJson(resp) || {};
-                    const status = data.status;
-
-                    // Update backend progress in real-time
-                    if (typeof data.progress_percent === 'number') {
-                        backendPercent = data.progress_percent;
-                    }
-                    if (data.current_stage_msg) {
-                        currentStageLabel.style.display = 'flex';
-                        currentStageText.textContent = data.current_stage_msg;
-                    }
-                    if (data.progress_log) {
-                        renderActivityLog(data.progress_log, data.current_stage);
-                    }
-
-                    if (status === 'queued') {
-                        setStatus(useApi ? 'Queued for API processing...' : 'Queued for local processing...');
-                    } else if (status === 'running') {
-                        const stageMsg = data.current_stage_msg || (useApi ? 'Processing via Cloud API...' : 'Processing locally...');
-                        setStatus(stageMsg);
-                    } else if (status === 'done') {
-                        handleResult(data.result || {});
-                        return;
-                    } else if (status === 'error') {
-                        const msg = data.error_message || 'Processing failed';
-                        setStatus(`Error: ${msg}`);
-                        // Pass full result if available for system_info context
-                        const resultData = data.result || { error_message: msg };
-                        if (!resultData.error_message) resultData.error_message = msg;
-                        setResults(resultData);
-                        stopProgress(false);
-                        return;
-                    }
-                    if (attempts > 1800) {
-                        throw new Error('Processing timed out');
-                    }
-                }
-            }
-
-            function showPreview(file) {
-                if (!file || !file.type.startsWith('image/')) {
-                    previewContainer.style.display = 'none';
-                    if (previewUrl) {
-                        URL.revokeObjectURL(previewUrl);
-                        previewUrl = null;
-                    }
-                    return;
-                }
-                if (previewUrl) {
-                    URL.revokeObjectURL(previewUrl);
-                }
-                previewUrl = URL.createObjectURL(file);
-                previewImage.src = previewUrl;
-                previewContainer.style.display = 'block';
-            }
-
-            function updateButtonLabel() {
-                if (fileInput.files.length > 0) {
-                    const name = fileInput.files[0].name;
-                    dropText.textContent = name;
-                    btn.textContent = 'Generate 3D model';
-                    btn.disabled = false;
-                    showPreview(fileInput.files[0]);
-                } else {
-                    dropText.textContent = 'Click to choose an image or drop it here';
-                    btn.textContent = 'Choose an image to start';
-                    btn.disabled = true;
-                    showPreview(null);
-                }
-            }
-
-            function updateApiOptions() {
-                const useApi = document.querySelector('input[name="processing"]:checked').value === 'api';
-                apiOptions.classList.toggle('active', useApi);
-                const placeholder = serverHasCredentials ? 'Using server credentials' : 'Enter your Cloud API token';
-                apiToken.placeholder = placeholder;
-                sysMode.textContent = useApi ? 'API' : 'Local';
-                requirementsText.textContent = useApi
-                    ? 'Cloud processing uses the Cloud API. Network stability improves completion time.'
-                    : 'Local processing runs TripoSR on CPU and bakes a simple texture map from the input image (not full PBR materials). Keep at least 6GB RAM available for stable results.';
-                updateModelInfo();
-                updateBalanceInfo();
+            function toggleProcessingMethod() {
+                const useApi = document.getElementById('api').checked;
+                document.getElementById('localOptions').style.display = useApi ? 'none' : 'block';
+                document.getElementById('apiOptions').classList.toggle('active', useApi);
+                document.getElementById('sysMode').textContent = useApi ? 'Cloud API' : 'Local';
+                document.getElementById('sysMode').className = useApi ? 
+                    'form-value highlight' : 'form-value success';
+                
                 if (useApi) {
-                    scheduleBalanceFetch();
+                    scheduleBalanceCheck();
                 }
             }
 
             function updateModelInfo() {
-                const model = apiModel.value;
-                const info = modelDescriptions[model];
+                const model = document.getElementById('apiModel').value;
+                const info = modelInfo[model];
                 if (info) {
-                    modelInfo.textContent = info.description;
-                    
-                    // Update resolution options
-                    const currentResolution = apiResolution.value;
-                    apiResolution.innerHTML = '';
-                    info.resolutions.forEach(res => {
-                        const option = document.createElement('option');
-                        option.value = res;
-                        option.textContent = res === '1536pro' ? '1536³ Pro' : `${res}³`;
-                        if (res === currentResolution || (res === info.resolutions[0] && !info.resolutions.includes(currentResolution))) {
-                            option.selected = true;
-                        }
-                        apiResolution.appendChild(option);
-                    });
+                    document.getElementById('modelInfo').textContent = info.desc;
+                    updateResolutionOptions();
                 }
-                updateBalanceInfo();
             }
 
-            // Event listeners
-            processingRadios.forEach(radio => {
-                radio.addEventListener('change', updateApiOptions);
-            });
-            
-            saveServerToken.addEventListener('click', async () => {
-                const token = serverApiToken.value.trim();
+            function updateResolutionOptions() {
+                const model = document.getElementById('apiModel').value;
+                const info = modelInfo[model];
+                const select = document.getElementById('apiResolution');
+                
+                if (info && info.resolutions) {
+                    select.innerHTML = info.resolutions.map(r => 
+                        `<option value="${r}">${r === '1536pro' ? '1536³ Pro' : r + '³'}</option>`
+                    ).join('');
+                }
+            }
+
+            let balanceTimer = null;
+            function scheduleBalanceCheck() {
+                if (balanceTimer) clearTimeout(balanceTimer);
+                balanceTimer = setTimeout(checkBalance, 600);
+            }
+
+            function checkBalance() {
+                const useApi = document.getElementById('api').checked;
+                if (!useApi) return;
+                
+                const token = document.getElementById('apiToken').value.trim();
                 if (!token) {
-                    setStatus('Please paste a server API token first.');
+                    document.getElementById('balanceInfo').textContent = 'Enter token to check balance';
+                    document.getElementById('balanceInfo').className = 'balance-box';
                     return;
                 }
-                saveServerToken.disabled = true;
-                try {
-                    const form = new FormData();
-                    form.append('token', token);
-                    const resp = await fetch('/credentials/update', {
-                        method: 'POST',
-                        body: form,
-                        credentials: 'same-origin'
-                    });
-                    if (!resp.ok) {
-                        const err = await resp.json();
-                        throw new Error(err.detail || `Server returned ${resp.status}`);
+                
+                document.getElementById('balanceInfo').textContent = 'Checking balance...';
+                
+                fetch('/hitem3d/balance', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: `api_token=${encodeURIComponent(token)}`
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.available !== undefined) {
+                        document.getElementById('balanceInfo').textContent = 
+                            `Balance: ${data.available} credits`;
+                        document.getElementById('balanceInfo').className = 'balance-box balance-ok';
+                    } else {
+                        throw new Error('Balance unavailable');
                     }
-                    serverHasCredentials = true;
-                    serverApiToken.value = '';
-                    updateApiTokenPlaceholder();
-                    setStatus('Server API token saved.');
-                    scheduleBalanceFetch();
-                } catch (e) {
-                    setStatus(`Error: ${e.message}`);
-                } finally {
-                    saveServerToken.disabled = false;
-                }
-            });
-            
-            apiModel.addEventListener('change', updateModelInfo);
-            apiResolution.addEventListener('change', updateBalanceInfo);
-            apiToken.addEventListener('input', () => {
-                balanceState.error = null;
-                updateBalanceInfo();
-                scheduleBalanceFetch();
-            });
-
-            fileInput.addEventListener('change', () => {
-                updateButtonLabel();
-                setStatus('');
-                setResults(null);
-            });
-
-            ;['dragenter', 'dragover'].forEach(evt => {
-                dropzone.addEventListener(evt, (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    dropzone.classList.add('dragover');
+                })
+                .catch(err => {
+                    document.getElementById('balanceInfo').textContent = 
+                        'Balance check failed: ' + err.message;
+                    document.getElementById('balanceInfo').className = 'balance-box balance-error';
                 });
-            });
+            }
 
-            ;['dragleave', 'drop'].forEach(evt => {
-                dropzone.addEventListener(evt, (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    if (evt === 'drop') return;
-                    dropzone.classList.remove('dragover');
-                });
-            });
-
-            dropzone.addEventListener('drop', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                dropzone.classList.remove('dragover');
-                const files = e.dataTransfer.files;
-                if (files && files.length > 0) {
-                    fileInput.files = files;
-                    updateButtonLabel();
-                    setStatus('');
-                    setResults(null);
-                }
-            });
-
-            btn.addEventListener('click', async () => {
-                if (!fileInput.files.length) return;
-                const file = fileInput.files[0];
-
-                const form = new FormData();
-                form.append('file', file);
+            function addLogEntry(message) {
+                if (!logStartTime) logStartTime = Date.now();
                 
-                const useApi = document.querySelector('input[name="processing"]:checked').value === 'api';
-                form.append('use_api', useApi);
+                const elapsed = Math.floor((Date.now() - logStartTime) / 1000);
+                const mins = Math.floor(elapsed / 60);
+                const secs = elapsed % 60;
+                const timeStr = `${mins}:${secs.toString().padStart(2, '0')}`;
                 
-                if (!useApi) {
-                    form.append('quality', document.getElementById('quality').value);
+                // Find icon
+                let icon = '📋';
+                const msgLower = message.toLowerCase();
+                for (const [key, value] of Object.entries(logIcons)) {
+                    if (msgLower.includes(key)) {
+                        icon = value;
+                        break;
+                    }
                 }
+                
+                const entry = document.createElement('div');
+                entry.className = 'log-entry';
+                entry.innerHTML = `
+                    <span class="log-icon">${icon}</span>
+                    <span class="log-timestamp">${timeStr}</span>
+                    <span class="log-message">${message}</span>
+                `;
+                
+                const log = document.getElementById('activityLog');
+                log.appendChild(entry);
+                log.scrollTop = log.scrollHeight;
+            }
+
+            function updateTaskIcon(message) {
+                let icon = '⏳';
+                const msgLower = message.toLowerCase();
+                for (const [key, value] of Object.entries(taskIcons)) {
+                    if (msgLower.includes(key)) {
+                        icon = value;
+                        break;
+                    }
+                }
+                document.getElementById('taskIcon').textContent = icon;
+            }
+
+            function updateProgress(percent, message) {
+                const fill = document.getElementById('progressFill');
+                fill.style.width = percent + '%';
+                fill.textContent = Math.round(percent) + '%';
+                
+                if (message) {
+                    document.getElementById('taskMessage').textContent = message;
+                    updateTaskIcon(message);
+                }
+                
+                if (startTime && percent > 0 && percent < 100) {
+                    const elapsed = (Date.now() - startTime) / 1000;
+                    const eta = (elapsed / percent) * (100 - percent);
+                    document.getElementById('elapsedTime').textContent = 
+                        'Elapsed: ' + formatTime(elapsed);
+                    document.getElementById('etaTime').textContent = 
+                        'ETA: ' + formatTime(eta);
+                }
+            }
+
+            function formatTime(seconds) {
+                const mins = Math.floor(seconds / 60);
+                const secs = Math.floor(seconds % 60);
+                return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            }
+
+            async function startGeneration() {
+                if (!selectedFile) return;
+                
+                const useApi = document.getElementById('api').checked;
+                const formData = new FormData();
+                formData.append('image', selectedFile);
+                formData.append('processing', useApi ? 'api' : 'local');
                 
                 if (useApi) {
-                    const token = apiToken.value.trim();
-                    if (!serverHasCredentials && !token) {
-                        setStatus('Please enter your Cloud API token');
-                        return;
-                    }
-                    if (token) {
-                        form.append('api_token', token);
-                    }
-                    const model = apiModel.value;
-                    const allowed = modelDescriptions[model]?.resolutions || [];
-                    if (allowed.length && !allowed.includes(apiResolution.value)) {
-                        apiResolution.value = allowed[0];
-                    }
-                    form.append('api_model', apiModel.value);
-                    form.append('api_resolution', apiResolution.value);
-                    form.append('api_format', apiFormat.value);
+                    formData.append('api_token', document.getElementById('apiToken').value);
+                    formData.append('api_model', document.getElementById('apiModel').value);
+                    formData.append('api_resolution', document.getElementById('apiResolution').value);
+                    formData.append('api_format', document.getElementById('apiFormat').value);
+                } else {
+                    formData.append('quality', document.getElementById('quality').value);
                 }
-
-                btn.disabled = true;
-                btn.textContent = 'Processing...';
-                setResults(null);
-                let preStatus = useApi ? 'Uploading to Cloud API and generating 3D model...' : 'Processing locally...';
-                if (!useApi && lastSystemInfo && typeof lastSystemInfo.available_gb === 'number' && typeof lastSystemInfo.required_gb === 'number') {
-                    if (lastSystemInfo.available_gb < lastSystemInfo.required_gb) {
-                        preStatus = `Warning: Low available RAM (${lastSystemInfo.available_gb}GB available, ${lastSystemInfo.required_gb}GB required). Processing locally...`;
-                    }
+                
+                document.getElementById('generateBtn').disabled = true;
+                startTime = Date.now();
+                logStartTime = Date.now();
+                logEntries = [];
+                document.getElementById('activityLog').innerHTML = '';
+                
+                const methodText = useApi ? 'Cloud API' : 'Local Processing';
+                addLogEntry(`🚀 Starting pipeline with ${methodText}`);
+                if (useApi) {
+                    addLogEntry(`   Model: ${document.getElementById('apiModel').value}, Res: ${document.getElementById('apiResolution').value}`);
                 }
-                setStatus(preStatus);
-                startProgress(useApi);
-
+                
+                updateProgress(0, `Starting ${methodText}...`);
+                
                 try {
-                    const resp = await fetch('/generate', {
+                    const response = await fetch('/generate', {
                         method: 'POST',
-                        body: form,
-                        credentials: 'same-origin'
+                        body: formData
                     });
-                    if (!resp.ok) {
-                        const error = await readResponseJson(resp);
-                        const detail = error && (error.detail || error.error || error.error_message);
-                        throw new Error(detail || `Server returned ${resp.status}`);
+                    
+                    if (!response.ok) {
+                        throw new Error('Upload failed');
                     }
-                    const data = await readResponseJson(resp) || {};
-                    if (data.job_id) {
-                        await pollJob(data.job_id, useApi);
-                    } else {
-                        handleResult(data);
-                    }
+                    
+                    const data = await response.json();
+                    jobId = data.job_id;
+                    
+                    // Start polling
+                    pollJob();
                 } catch (err) {
-                    console.error(err);
-                    const msg = err && err.message ? err.message : 'Request failed';
-                    const friendly = msg === 'Failed to fetch'
-                        ? 'Failed to fetch. The server may have restarted or become unreachable during processing.'
-                        : msg;
-                    setStatus(`Error: ${friendly}`);
-                    setResults({ error_message: friendly });
-                    stopProgress(false);
-                } finally {
-                    btn.disabled = false;
-                    btn.textContent = 'Generate again';
+                    addLogEntry(`❌ Error: ${err.message}`);
+                    document.getElementById('statusText').textContent = '❌ Failed';
+                    document.getElementById('statusText').style.color = '#ef4444';
+                    document.getElementById('generateBtn').disabled = false;
+                }
+            }
+
+            async function pollJob() {
+                while (jobId) {
+                    await new Promise(r => setTimeout(r, 2000));
+                    
+                    try {
+                        const response = await fetch(`/job/${jobId}`);
+                        const data = await response.json();
+                        
+                        if (data.progress_percent !== undefined) {
+                            updateProgress(data.progress_percent, data.current_stage_msg || 'Processing...');
+                        }
+                        
+                        if (data.progress_log) {
+                            data.progress_log.forEach(entry => {
+                                addLogEntry(entry.msg);
+                            });
+                        }
+                        
+                        if (data.status === 'done') {
+                            handleComplete(data.result);
+                            break;
+                        } else if (data.status === 'error') {
+                            throw new Error(data.error || 'Processing failed');
+                        }
+                    } catch (err) {
+                        addLogEntry(`❌ Error: ${err.message}`);
+                        document.getElementById('statusText').textContent = '❌ Failed';
+                        document.getElementById('statusText').style.color = '#ef4444';
+                        break;
+                    }
+                }
+                
+                document.getElementById('generateBtn').disabled = false;
+            }
+
+            function handleComplete(result) {
+                updateProgress(100, 'Complete! Your 3D model is ready.');
+                document.getElementById('taskIcon').textContent = '✅';
+                document.getElementById('statusText').textContent = '✅ Completed';
+                document.getElementById('statusText').style.color = '#22c55e';
+                document.getElementById('etaTime').textContent = 'ETA: 00:00';
+                
+                outputs = result;
+                
+                // Update output paths
+                if (result.obj) {
+                    document.getElementById('objPath').textContent = result.obj.split('/').pop();
+                    document.getElementById('objPath').style.color = '#22c55e';
+                }
+                if (result.stl) {
+                    document.getElementById('stlPath').textContent = result.stl.split('/').pop();
+                    document.getElementById('stlPath').style.color = '#22c55e';
+                }
+                if (result.glb) {
+                    document.getElementById('glbPath').textContent = result.glb.split('/').pop();
+                    document.getElementById('glbPath').style.color = '#22c55e';
+                }
+                
+                // Show results
+                let html = '<div class="download-links">';
+                if (result.obj) html += `<a href="${result.obj}" download>Download OBJ</a>`;
+                if (result.stl) html += `<a href="${result.stl}" download>Download STL</a>`;
+                if (result.glb) html += `<a href="${result.glb}" download>Download GLB</a>`;
+                if (result.fbx) html += `<a href="${result.fbx}" download>Download FBX</a>`;
+                if (result.usdz) html += `<a href="${result.usdz}" download>Download USDZ</a>`;
+                html += '</div>';
+                
+                document.getElementById('resultsContainer').innerHTML = html;
+                
+                addLogEntry('✅ Processing completed successfully');
+                if (result.stats && result.stats.total_seconds) {
+                    addLogEntry(`✅ Done! Total time: ${result.stats.total_seconds.toFixed(1)}s`);
+                }
+            }
+
+            function resetUI() {
+                selectedFile = null;
+                outputs = {};
+                document.getElementById('fileInput').value = '';
+                document.getElementById('filePath').value = '';
+                document.getElementById('previewContainer').innerHTML = '<span>No image selected</span>';
+                document.getElementById('progressFill').style.width = '0%';
+                document.getElementById('progressFill').textContent = '0%';
+                document.getElementById('taskIcon').textContent = '⏳';
+                document.getElementById('taskMessage').textContent = 'Ready';
+                document.getElementById('elapsedTime').textContent = 'Elapsed: --:--';
+                document.getElementById('etaTime').textContent = 'ETA: --:--';
+                document.getElementById('statusText').textContent = '';
+                document.getElementById('activityLog').innerHTML = '';
+                document.getElementById('resultsContainer').innerHTML = '';
+                document.getElementById('generateBtn').disabled = true;
+                
+                ['obj', 'stl', 'glb'].forEach(fmt => {
+                    document.getElementById(fmt + 'Path').textContent = '—';
+                    document.getElementById(fmt + 'Path').style.color = '#64748b';
+                });
+                
+                logStartTime = null;
+                logEntries = [];
+                addLogEntry('🔄 Reset');
+            }
+
+            function openOutput(format) {
+                const path = outputs[format];
+                if (path) {
+                    window.open(path, '_blank');
+                }
+            }
+
+            function saveOutput(format) {
+                const path = outputs[format];
+                if (path) {
+                    const link = document.createElement('a');
+                    link.href = path;
+                    link.download = path.split('/').pop();
+                    link.click();
+                }
+            }
+
+            function openOutputFolder() {
+                window.open('/output', '_blank');
+            }
+
+            function logout() {
+                window.location.href = '/logout';
+            }
+
+            function quitApp() {
+                if (confirm('Are you sure you want to quit?')) {
+                    window.close();
+                }
+            }
+
+            // Drag and drop
+            const dropzone = document.body;
+            
+            dropzone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                dropzone.classList.add('dragover');
+            });
+            
+            dropzone.addEventListener('dragleave', () => {
+                dropzone.classList.remove('dragover');
+            });
+            
+            dropzone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropzone.classList.remove('dragover');
+                
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    document.getElementById('fileInput').files = files;
+                    handleFileSelect({ target: { files: files } });
                 }
             });
-
-            // Initialize
-            (async () => {
-                try {
-                    const resp = await fetch('/credentials/availability');
-                    if (resp.ok) {
-                        const data = await resp.json();
-                        serverHasCredentials = !!data.available;
-                    }
-                } catch (e) {}
-                updateApiTokenPlaceholder();
-                const refreshSystemInfo = async () => {
-                    try {
-                        const infoResp = await fetch('/system-info');
-                        if (!infoResp.ok) return;
-                        const info = await infoResp.json();
-                        lastSystemInfo = info;
-                        if (info.available_gb !== null) {
-                            sysAvailable.textContent = `${info.available_gb} GB`;
-                            // Color-code: green (safe >=8), amber (warning 4-8), red (risky <4)
-                            if (info.available_gb >= 8) {
-                                sysAvailable.style.color = '#4ade80';
-                            } else if (info.available_gb >= 4) {
-                                sysAvailable.style.color = '#fbbf24';
-                            } else {
-                                sysAvailable.style.color = '#f87171';
-                            }
-                        } else {
-                            sysAvailable.textContent = '--';
-                            sysAvailable.style.color = '';
-                        }
-                        sysTotal.textContent = info.total_gb !== null ? `${info.total_gb} GB` : '--';
-                        sysRequired.textContent = info.required_gb !== null ? `${info.required_gb} GB` : '--';
-                        sysCpu.textContent = info.cpu_count !== null ? info.cpu_count : '--';
-                        sysPlatform.textContent = info.platform || '--';
-                    } catch (e) {}
-                };
-                await refreshSystemInfo();
-                setInterval(refreshSystemInfo, 3000);
-                updateApiOptions();
-            })();
         </script>
     </body>
     </html>
@@ -1459,942 +1358,250 @@ def _main_app_html():
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    """Serve main app; redirect to login when password is set and session invalid."""
-    if not is_password_configured():
-        return RedirectResponse(url="/setup")
-    if not verify_session_token(_get_session(request) or ""):
-        return RedirectResponse(url="/login")
-    return _main_app_html()
+    """Render the main application page or login if not authenticated."""
+    token = _get_session(request)
+    if is_password_configured() and not verify_session_token(token or ""):
+        return RedirectResponse(url="/login", status_code=302)
+    return HTMLResponse(content=_main_app_html())
 
 
 @app.get("/system-info")
-async def system_info(_auth: bool = Depends(require_session)):
+async def get_system_info():
+    """Get current system information."""
     try:
         mem = psutil.virtual_memory()
-        required = 4.0
+        import socket
+
         return {
-            "available_gb": round(mem.available / (1024**3), 2),
-            "total_gb": round(mem.total / (1024**3), 2),
-            "required_gb": required,
+            "device_id": str(uuid.uuid4())[:8].upper(),
+            "hostname": socket.gethostname()[:20],
+            "ram_available_gb": mem.available / (1024**3),
+            "ram_total_gb": mem.total / (1024**3),
             "cpu_count": os.cpu_count(),
-            "platform": platform.platform(),
+            "platform": platform.system(),
+            "release": platform.release(),
         }
-    except Exception:
-        return {
-            "available_gb": None,
-            "total_gb": None,
-            "required_gb": 4.0,
-            "cpu_count": None,
-            "platform": None,
-        }
-
-
-LOGIN_HTML = """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8" />
-    <title>Login — Image to 3D</title>
-    <style>
-        body { font-family: system-ui, sans-serif; background: #1e293b; color: #e5e7eb; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
-        .card { background: rgba(15,23,42,0.95); border-radius: 16px; padding: 28px; max-width: 360px; width: 100%; border: 1px solid rgba(148,163,184,0.25); }
-        h1 { margin: 0 0 8px; font-size: 22px; }
-        input { width: 100%; padding: 10px 12px; margin: 8px 0; border: 1px solid #475569; border-radius: 8px; background: #0f172a; color: #e5e7eb; box-sizing: border-box; }
-        button { width: 100%; padding: 10px; margin-top: 12px; border: none; border-radius: 8px; background: #22c55e; color: white; font-weight: 600; cursor: pointer; }
-        button:hover { filter: brightness(1.05); }
-        .error { color: #f87171; font-size: 14px; margin-top: 8px; }
-    </style>
-</head>
-<body>
-    <div class="card">
-        <h1>Image to 3D — Login</h1>
-        <p style="color:#94a3b8; margin:0 0 16px;">Enter the application password.</p>
-        <form method="post" action="/login">
-            <input type="password" name="password" placeholder="Password" required autofocus />
-            <button type="submit">Log in</button>
-        </form>
-        <p id="err" class="error"></p>
-    </div>
-    <script>
-        const params = new URLSearchParams(location.search);
-        if (params.get('error') === '1') document.getElementById('err').textContent = 'Incorrect password.';
-    </script>
-</body>
-</html>
-"""
-
-SETUP_HTML = """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8" />
-    <title>Set Password — Image to 3D</title>
-    <style>
-        body { font-family: system-ui, sans-serif; background: #1e293b; color: #e5e7eb; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
-        .card { background: rgba(15,23,42,0.95); border-radius: 16px; padding: 28px; max-width: 380px; width: 100%; border: 1px solid rgba(148,163,184,0.25); }
-        h1 { margin: 0 0 8px; font-size: 22px; }
-        input { width: 100%; padding: 10px 12px; margin: 8px 0; border: 1px solid #475569; border-radius: 8px; background: #0f172a; color: #e5e7eb; box-sizing: border-box; }
-        button { width: 100%; padding: 10px; margin-top: 12px; border: none; border-radius: 8px; background: #22c55e; color: white; font-weight: 600; cursor: pointer; }
-        button:hover { filter: brightness(1.05); }
-        .error { color: #f87171; font-size: 14px; margin-top: 8px; }
-        .note { color: #94a3b8; font-size: 13px; margin: 0 0 8px; }
-    </style>
-</head>
-<body>
-    <div class="card">
-        <h1>Set Application Password</h1>
-        <p class="note">Create a password before anyone can use the app.</p>
-        <form method="post" action="/setup">
-            <input type="password" name="password" placeholder="New password" required />
-            <input type="password" name="confirm" placeholder="Confirm password" required />
-            <button type="submit">Save password</button>
-        </form>
-        <p id="err" class="error"></p>
-    </div>
-    <script>
-        const params = new URLSearchParams(location.search);
-        const err = params.get('error');
-        if (err === 'mismatch') document.getElementById('err').textContent = 'Passwords do not match.';
-        if (err === 'short') document.getElementById('err').textContent = 'Password must be at least 8 characters.';
-        if (err === 'failed') document.getElementById('err').textContent = 'Could not save password.';
-        if (err === 'configured') document.getElementById('err').textContent = 'Password already set. Please log in.';
-    </script>
-</body>
-</html>
-"""
-
-REGISTER_HTML = """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8" />
-    <title>Register — Image to 3D</title>
-    <style>
-        body { font-family: system-ui, sans-serif; background: radial-gradient(circle at top, #1e293b, #020617); color: #e5e7eb; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
-        .card { background: rgba(15,23,42,0.95); border-radius: 20px; padding: 32px; max-width: 400px; width: 100%; border: 1px solid rgba(148,163,184,0.25); }
-        h1 { margin: 0 0 8px; font-size: 24px; color: #22c55e; }
-        .subtitle { color: #94a3b8; margin: 0 0 20px; font-size: 14px; }
-        input { width: 100%; padding: 12px 14px; margin: 8px 0; border: 1px solid #475569; border-radius: 10px; background: #0f172a; color: #e5e7eb; box-sizing: border-box; font-size: 14px; }
-        input:focus { outline: none; border-color: #22c55e; box-shadow: 0 0 0 3px rgba(34,197,94,0.15); }
-        button { width: 100%; padding: 14px; margin-top: 16px; border: none; border-radius: 10px; background: linear-gradient(135deg, #22c55e, #16a34a); color: white; font-weight: 600; font-size: 15px; cursor: pointer; transition: all 0.2s; }
-        button:hover { filter: brightness(1.1); box-shadow: 0 8px 25px rgba(22,163,74,0.4); }
-        .error { color: #f87171; font-size: 13px; margin-top: 10px; display: none; }
-        .success { color: #22c55e; font-size: 13px; margin-top: 10px; display: none; }
-        .login-link { text-align: center; margin-top: 20px; font-size: 14px; color: #94a3b8; }
-        .login-link a { color: #22c55e; text-decoration: none; }
-        .login-link a:hover { text-decoration: underline; }
-        .trial-badge { display: inline-block; background: linear-gradient(135deg, #22c55e, #16a34a); padding: 6px 14px; border-radius: 999px; font-size: 12px; font-weight: 600; margin-bottom: 16px; }
-    </style>
-</head>
-<body>
-    <div class="card">
-        <h1>Create Account</h1>
-        <p class="subtitle">Join ImageTo3D Pro today</p>
-        
-        <div class="trial-badge">1 FREE Generation</div>
-        
-        <form method="post" action="/register">
-            <input type="text" name="username" placeholder="Username" required minlength="3" maxlength="30" pattern="[A-Za-z0-9_]+" title="Letters, numbers and underscores only" />
-            <input type="email" name="email" placeholder="Email address" required />
-            <input type="password" name="password" placeholder="Password" required minlength="6" />
-            <input type="password" name="confirm" placeholder="Confirm password" required />
-            <button type="submit">Create Account</button>
-        </form>
-        
-        <p id="errorMsg" class="error"></p>
-        <p id="successMsg" class="success"></p>
-        
-        <div class="login-link">
-            Already have an account? <a href="/login">Log in</a>
-        </div>
-    </div>
-    
-    <script>
-        const params = new URLSearchParams(location.search);
-        const err = params.get('error');
-        const errorMsg = document.getElementById('errorMsg');
-        const successMsg = document.getElementById('successMsg');
-        
-        if (err === 'exists') {
-            errorMsg.textContent = 'Username already taken. Please choose another.';
-            errorMsg.style.display = 'block';
-        } else if (err === 'mismatch') {
-            errorMsg.textContent = 'Passwords do not match.';
-            errorMsg.style.display = 'block';
-        } else if (err === 'short') {
-            errorMsg.textContent = 'Password must be at least 6 characters.';
-            errorMsg.style.display = 'block';
-        } else if (err === 'invalid') {
-            errorMsg.textContent = 'Invalid username format. Use letters, numbers and underscores only.';
-            errorMsg.style.display = 'block';
-        } else if (params.get('registered') === '1') {
-            successMsg.textContent = 'Account created! You can now log in.';
-            successMsg.style.display = 'block';
-        }
-    </script>
-</body>
-</html>
-"""
-
-DASHBOARD_HTML = """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8" />
-    <title>Dashboard — Image to 3D</title>
-    <style>
-        body { font-family: system-ui, sans-serif; background: radial-gradient(circle at top, #1e293b, #020617); color: #e5e7eb; min-height: 100vh; margin: 0; }
-        .container { max-width: 900px; margin: 0 auto; padding: 24px; }
-        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid rgba(148,163,184,0.2); }
-        .header h1 { margin: 0; font-size: 24px; color: #22c55e; }
-        .header a { color: #94a3b8; text-decoration: none; font-size: 14px; }
-        .header a:hover { color: #e5e7eb; }
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
-        .card { background: rgba(15,23,42,0.95); border-radius: 16px; padding: 24px; border: 1px solid rgba(148,163,184,0.25); }
-        .card h2 { margin: 0 0 16px; font-size: 18px; color: #e5e7eb; }
-        .stat { display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid rgba(55,65,81,0.5); }
-        .stat:last-child { border-bottom: none; }
-        .stat-label { color: #94a3b8; font-size: 14px; }
-        .stat-value { font-weight: 600; font-size: 14px; }
-        .stat-value.success { color: #22c55e; }
-        .stat-value.warning { color: #f59e0b; }
-        .stat-value.error { color: #ef4444; }
-        .progress-bar { height: 8px; background: rgba(30,41,59,0.9); border-radius: 999px; margin: 12px 0; overflow: hidden; }
-        .progress-fill { height: 100%; background: linear-gradient(90deg, #22c55e, #38bdf8); border-radius: 999px; transition: width 0.3s; }
-        .btn { display: inline-block; width: 100%; padding: 12px; margin-top: 12px; border: none; border-radius: 10px; background: linear-gradient(135deg, #22c55e, #16a34a); color: white; font-weight: 600; font-size: 14px; cursor: pointer; text-align: center; text-decoration: none; box-sizing: border-box; }
-        .btn:hover { filter: brightness(1.1); }
-        .btn-secondary { background: rgba(55,65,81,0.8); }
-        .btn-secondary:hover { background: rgba(75,85,101,0.8); }
-        input { width: 100%; padding: 10px 12px; margin: 8px 0; border: 1px solid #475569; border-radius: 8px; background: #0f172a; color: #e5e7eb; box-sizing: border-box; font-size: 14px; }
-        input:focus { outline: none; border-color: #22c55e; }
-        .alert { padding: 12px; border-radius: 8px; margin-top: 12px; font-size: 13px; }
-        .alert-success { background: rgba(21,128,61,0.2); border-left: 3px solid #22c55e; color: #a7f3d0; }
-        .alert-error { background: rgba(127,29,29,0.2); border-left: 3px solid #ef4444; color: #fecdd3; }
-        .user-info { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
-        .avatar { width: 48px; height: 48px; border-radius: 50%; background: linear-gradient(135deg, #22c55e, #16a34a); display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 600; }
-        .user-details h2 { margin: 0 0 4px; font-size: 20px; }
-        .user-details p { margin: 0; color: #94a3b8; font-size: 13px; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>Dashboard</h1>
-            <div>
-                <a href="/">Generate 3D</a> | 
-                <a href="/logout">Logout</a>
-            </div>
-        </div>
-        
-        <div class="user-info">
-            <div class="avatar">{{USERNAME_FIRST}}</div>
-            <div class="user-details">
-                <h2>{{USERNAME}}</h2>
-                <p>Member since {{CREATED_AT}}</p>
-            </div>
-        </div>
-        
-        <div class="grid">
-            <!-- Trial Status Card -->
-            <div class="card">
-                <h2>Trial Status</h2>
-                <div class="progress-bar">
-                    <div class="progress-fill" style="width: {{TRIAL_PERCENT}}%"></div>
-                </div>
-                <div class="stat">
-                    <span class="stat-label">Generations Used</span>
-                    <span class="stat-value">{{TRIAL_USED}}</span>
-                </div>
-                <div class="stat">
-                    <span class="stat-label">Generations Remaining</span>
-                    <span class="stat-value {{TRIAL_CLASS}}">{{TRIAL_REMAINING}}</span>
-                </div>
-                {{TRIAL_MESSAGE}}
-            </div>
-            
-            <!-- License Status Card -->
-            <div class="card">
-                <h2>License Status</h2>
-                <div class="stat">
-                    <span class="stat-label">Plan</span>
-                    <span class="stat-value">{{LICENSE_PLAN}}</span>
-                </div>
-                <div class="stat">
-                    <span class="stat-label">Credits</span>
-                    <span class="stat-value {{LICENSE_CLASS}}">{{LICENSE_CREDITS}}</span>
-                </div>
-                <div class="stat">
-                    <span class="stat-label">Expires</span>
-                    <span class="stat-value">{{LICENSE_EXPIRES}}</span>
-                </div>
-                {{LICENSE_MESSAGE}}
-            </div>
-            
-            <!-- Quick Actions Card -->
-            <div class="card">
-                <h2>Quick Actions</h2>
-                <a href="/" class="btn">Generate 3D Model</a>
-                <a href="#" onclick="document.getElementById('licenseForm').style.display='block';return false;" class="btn btn-secondary">Activate License</a>
-                <a href="#" onclick="document.getElementById('passwordForm').style.display='block';return false;" class="btn btn-secondary">Change Password</a>
-            </div>
-            
-            <!-- Activate License Form -->
-            <div class="card" id="licenseForm" style="display:none;">
-                <h2>Activate License</h2>
-                <form method="post" action="/dashboard/activate">
-                    <input type="text" name="license_key" placeholder="Enter license key" required />
-                    <button type="submit" class="btn">Activate</button>
-                </form>
-                <p id="licenseMsg"></p>
-            </div>
-            
-            <!-- Change Password Form -->
-            <div class="card" id="passwordForm" style="display:none;">
-                <h2>Change Password</h2>
-                <form method="post" action="/dashboard/password">
-                    <input type="password" name="new_password" placeholder="New password" required minlength="6" />
-                    <input type="password" name="confirm" placeholder="Confirm new password" required />
-                    <button type="submit" class="btn">Update Password</button>
-                </form>
-                <p id="passwordMsg"></p>
-            </div>
-        </div>
-    </div>
-    
-    <script>
-        const params = new URLSearchParams(location.search);
-        if (params.get('license') === 'success') {
-            document.getElementById('licenseMsg').innerHTML = '<div class="alert alert-success">License activated successfully!</div>';
-            document.getElementById('licenseForm').style.display = 'block';
-        } else if (params.get('license') === 'error') {
-            document.getElementById('licenseMsg').innerHTML = '<div class="alert alert-error">Invalid license key.</div>';
-            document.getElementById('licenseForm').style.display = 'block';
-        }
-        if (params.get('password') === 'success') {
-            document.getElementById('passwordMsg').innerHTML = '<div class="alert alert-success">Password updated successfully!</div>';
-            document.getElementById('passwordForm').style.display = 'block';
-        } else if (params.get('password') === 'error') {
-            document.getElementById('passwordMsg').innerHTML = '<div class="alert alert-error">Passwords do not match.</div>';
-            document.getElementById('passwordForm').style.display = 'block';
-        }
-    </script>
-</body>
-</html>
-"""
-
-
-@app.get("/setup", response_class=HTMLResponse)
-async def setup_page():
-    if is_password_configured():
-        return RedirectResponse(url="/login")
-    return SETUP_HTML
-
-
-@app.post("/setup")
-async def setup_post(password: str = Form(...), confirm: str = Form(...)):
-    if is_password_configured():
-        return RedirectResponse(url="/setup?error=configured", status_code=302)
-    if password != confirm:
-        return RedirectResponse(url="/setup?error=mismatch", status_code=302)
-    if len(password) < 8:
-        return RedirectResponse(url="/setup?error=short", status_code=302)
-    try:
-        set_password(password)
-    except Exception:
-        return RedirectResponse(url="/setup?error=failed", status_code=302)
-    return RedirectResponse(url="/login", status_code=302)
-
-
-@app.get("/register", response_class=HTMLResponse)
-async def register_page(request: Request):
-    """Serve registration form."""
-    # If already logged in, redirect to main app
-    if verify_session_token(_get_session(request) or ""):
-        return RedirectResponse(url="/")
-    return REGISTER_HTML
-
-
-@app.post("/register")
-async def register_post(
-    username: str = Form(...),
-    email: str = Form(...),
-    password: str = Form(...),
-    confirm: str = Form(...),
-):
-    """Register a new user."""
-    # Validate username format
-    if not re.match(r"^[A-Za-z0-9_]{3,30}$", username):
-        return RedirectResponse(url="/register?error=invalid", status_code=302)
-
-    # Validate password
-    if len(password) < 6:
-        return RedirectResponse(url="/register?error=short", status_code=302)
-
-    # Check password match
-    if password != confirm:
-        return RedirectResponse(url="/register?error=mismatch", status_code=302)
-
-    # Try to create user
-    success = create_user(username, password, is_admin=False)
-
-    if not success:
-        return RedirectResponse(url="/register?error=exists", status_code=302)
-
-    return RedirectResponse(url="/register?registered=1", status_code=302)
-
-
-@app.get("/dashboard", response_class=HTMLResponse)
-async def dashboard_page(request: Request):
-    """Serve user dashboard."""
-    if not is_password_configured():
-        return RedirectResponse(url="/setup")
-    token = _get_session(request)
-    if not verify_session_token(token or ""):
-        return RedirectResponse(url="/login")
-
-    # For now, just show a basic dashboard - user tracking will be added in Stage 5
-    html = DASHBOARD_HTML
-    html = html.replace("{{USERNAME}}", "User")
-    html = html.replace("{{USERNAME_FIRST}}", "U")
-    html = html.replace("{{CREATED_AT}}", "Today")
-    html = html.replace("{{TRIAL_PERCENT}}", "100")
-    html = html.replace("{{TRIAL_USED}}", "0")
-    html = html.replace("{{TRIAL_REMAINING}}", "1")
-    html = html.replace("{{TRIAL_CLASS}}", "success")
-    html = html.replace(
-        "{{TRIAL_MESSAGE}}", '<a href="/" class="btn">Generate 3D Model</a>'
-    )
-    html = html.replace("{{LICENSE_PLAN}}", "Trial")
-    html = html.replace("{{LICENSE_CREDITS}}", "--")
-    html = html.replace("{{LICENSE_CLASS}}", "")
-    html = html.replace("{{LICENSE_EXPIRES}}", "Never")
-    html = html.replace(
-        "{{LICENSE_MESSAGE}}",
-        '<a href="#" onclick="document.getElementById(\'licenseForm\').style.display=\'block\';return false;" class="btn btn-secondary">Purchase License</a>',
-    )
-
-    return html
-
-
-@app.post("/dashboard/activate")
-async def dashboard_activate_license(request: Request, license_key: str = Form(...)):
-    """Activate a license key."""
-    if not is_password_configured():
-        return RedirectResponse(url="/setup")
-    token = _get_session(request)
-    if not verify_session_token(token or ""):
-        return RedirectResponse(url="/login")
-
-    # TODO: Validate license key and add to user
-    # For now, just show error
-    return RedirectResponse(url="/dashboard?license=error", status_code=302)
-
-
-@app.post("/dashboard/password")
-async def dashboard_change_password(
-    request: Request, new_password: str = Form(...), confirm: str = Form(...)
-):
-    """Change user password."""
-    if not is_password_configured():
-        return RedirectResponse(url="/setup")
-    token = _get_session(request)
-    if not verify_session_token(token or ""):
-        return RedirectResponse(url="/login")
-
-    if new_password != confirm:
-        return RedirectResponse(url="/dashboard?password=error", status_code=302)
-
-    # TODO: Update password for logged-in user
-    return RedirectResponse(url="/dashboard?password=success", status_code=302)
-
-
-# Admin HTML Template
-ADMIN_HTML = """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8" />
-    <title>Admin Panel — Image to 3D</title>
-    <style>
-        body { font-family: system-ui, sans-serif; background: radial-gradient(circle at top, #1e293b, #020617); color: #e5e7eb; min-height: 100vh; margin: 0; }
-        .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
-        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid rgba(148,163,184,0.2); }
-        .header h1 { margin: 0; font-size: 24px; color: #22c55e; }
-        .header a { color: #94a3b8; text-decoration: none; font-size: 14px; }
-        .card { background: rgba(15,23,42,0.95); border-radius: 16px; padding: 24px; border: 1px solid rgba(148,163,184,0.25); margin-bottom: 20px; }
-        .card h2 { margin: 0 0 16px; font-size: 18px; color: #e5e7eb; }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { padding: 12px; text-align: left; border-bottom: 1px solid rgba(55,65,81,0.5); font-size: 14px; }
-        th { color: #94a3b8; font-weight: 500; text-transform: uppercase; font-size: 11px; letter-spacing: 0.05em; }
-        tr:hover { background: rgba(30,41,59,0.5); }
-        .badge { display: inline-block; padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; }
-        .badge-admin { background: rgba(239,68,68,0.2); color: #f87171; }
-        .badge-user { background: rgba(34,197,94,0.2); color: #22c55e; }
-        .badge-trial { background: rgba(251,191,36,0.2); color: #fbbf24; }
-        .badge-license { background: rgba(59,130,246,0.2); color: #60a5fa; }
-        .btn { display: inline-block; padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 500; cursor: pointer; border: none; text-decoration: none; }
-        .btn-danger { background: rgba(239,68,68,0.2); color: #f87171; }
-        .btn-danger:hover { background: rgba(239,68,68,0.3); }
-        .btn-warning { background: rgba(251,191,36,0.2); color: #fbbf24; }
-        .btn-warning:hover { background: rgba(251,191,36,0.3); }
-        .btn-primary { background: rgba(34,197,94,0.2); color: #22c55e; }
-        .btn-primary:hover { background: rgba(34,197,94,0.3); }
-        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
-        .stat-box { background: rgba(15,23,42,0.8); border: 1px solid rgba(55,65,81,0.5); border-radius: 12px; padding: 16px; }
-        .stat-box .value { font-size: 28px; font-weight: 700; color: #22c55e; }
-        .stat-box .label { font-size: 12px; color: #94a3b8; margin-top: 4px; }
-        .form-inline { display: flex; gap: 12px; align-items: flex-end; }
-        .form-inline input { flex: 1; margin: 0; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>Admin Panel</h1>
-            <div><a href="/logout">Logout</a></div>
-        </div>
-        <div class="stats-grid">
-            <div class="stat-box"><div class="value">{{TOTAL_USERS}}</div><div class="label">Total Users</div></div>
-            <div class="stat-box"><div class="value">{{TOTAL_ADMINS}}</div><div class="label">Admins</div></div>
-            <div class="stat-box"><div class="value">{{TRIAL_USERS}}</div><div class="label">On Trial</div></div>
-            <div class="stat-box"><div class="value">{{LICENSE_USERS}}</div><div class="label">With License</div></div>
-        </div>
-        <div class="card">
-            <h2>Add New User</h2>
-            <form method="post" action="/admin/add-user" class="form-inline">
-                <input type="text" name="username" placeholder="Username" required />
-                <input type="password" name="password" placeholder="Password" required />
-                <button type="submit" class="btn btn-primary">Add User</button>
-            </form>
-        </div>
-        <div class="card">
-            <h2>All Users</h2>
-            <table><thead><tr><th>ID</th><th>Username</th><th>Created</th><th>Role</th><th>Trial</th><th>License</th><th>Actions</th></tr></thead>
-            <tbody>{{USER_ROWS}}</tbody></table>
-        </div>
-    </div>
-</body>
-</html>
-"""
-
-ADMIN_LOGIN_HTML = """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8" />
-    <title>Admin Login — Image to 3D</title>
-    <style>
-        body { font-family: system-ui, sans-serif; background: radial-gradient(circle at top, #1e293b, #020617); color: #e5e7eb; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
-        .card { background: rgba(15,23,42,0.95); border-radius: 20px; padding: 32px; max-width: 400px; width: 100%; border: 1px solid rgba(148,163,184,0.25); }
-        h1 { margin: 0 0 8px; font-size: 24px; color: #ef4444; }
-        .subtitle { color: #94a3b8; margin: 0 0 20px; font-size: 14px; }
-        input { width: 100%; padding: 12px 14px; margin: 8px 0; border: 1px solid #475569; border-radius: 10px; background: #0f172a; color: #e5e7eb; box-sizing: border-box; font-size: 14px; }
-        button { width: 100%; padding: 14px; margin-top: 16px; border: none; border-radius: 10px; background: linear-gradient(135deg, #ef4444, #dc2626); color: white; font-weight: 600; font-size: 15px; cursor: pointer; }
-        .error { color: #f87171; font-size: 13px; margin-top: 10px; display: none; }
-    </style>
-</head>
-<body>
-    <div class="card">
-        <h1>Admin Login</h1>
-        <p class="subtitle">Restricted access</p>
-        <form method="post" action="/admin/login">
-            <input type="text" name="username" placeholder="Admin username" required autofocus />
-            <input type="password" name="password" placeholder="Password" required />
-            <button type="submit">Login</button>
-        </form>
-        <p id="errorMsg" class="error"></p>
-    </div>
-    <script>
-        const params = new URLSearchParams(location.search);
-        if (params.get('error') === '1') {
-            document.getElementById('errorMsg').textContent = 'Invalid admin credentials.';
-            document.getElementById('errorMsg').style.display = 'block';
-        }
-    </script>
-</body>
-</html>
-"""
-
-
-@app.get("/admin/login", response_class=HTMLResponse)
-async def admin_login_page(request: Request):
-    if not is_password_configured():
-        return RedirectResponse(url="/setup")
-    return ADMIN_LOGIN_HTML
-
-
-@app.post("/admin/login")
-async def admin_login_post(username: str = Form(...), password: str = Form(...)):
-    if not is_password_configured():
-        return RedirectResponse(url="/setup")
-    user_id = verify_user(username, password)
-    if not user_id or not is_user_admin(user_id):
-        return RedirectResponse(url="/admin/login?error=1", status_code=302)
-    token = create_session_token()
-    response = RedirectResponse(url="/admin/users", status_code=302)
-    response.set_cookie(
-        key=SESSION_COOKIE,
-        value=token,
-        httponly=True,
-        max_age=SESSION_MAX_AGE,
-        samesite="lax",
-    )
-    return response
-
-
-@app.get("/admin/users", response_class=HTMLResponse)
-async def admin_users_page(request: Request):
-    if not is_password_configured():
-        return RedirectResponse(url="/setup")
-    token = _get_session(request)
-    if not verify_session_token(token or ""):
-        return RedirectResponse(url="/admin/login")
-    users = get_all_users()
-    total_users = len(users)
-    total_admins = sum(1 for u in users if u.get("is_admin"))
-    trial_users = sum(
-        1
-        for u in users
-        if u.get("generations_remaining", 0) > 0 and not u.get("plan_id")
-    )
-    license_users = sum(1 for u in users if u.get("plan_id"))
-    user_rows = []
-    for u in users:
-        role_badge = (
-            '<span class="badge badge-admin">Admin</span>'
-            if u.get("is_admin")
-            else '<span class="badge badge-user">User</span>'
-        )
-        trial = f"{u.get('generations_remaining', 0)} left"
-        license_badge = u.get("plan_id") or "-"
-        actions = ""
-        if not u.get("is_admin"):
-            actions = f'''<form method="post" action="/admin/reset-trial" style="display:inline"><input type="hidden" name="user_id" value="{u["id"]}"><button type="submit" class="btn btn-warning">Reset</button></form>'''
-        user_rows.append(
-            f"<tr><td>{u['id']}</td><td>{u['username']}</td><td>{u.get('created_at', '')[:10]}</td><td>{role_badge}</td><td>{trial}</td><td>{license_badge}</td><td>{actions}</td></tr>"
-        )
-    html = (
-        ADMIN_HTML.replace("{{TOTAL_USERS}}", str(total_users))
-        .replace("{{TOTAL_ADMINS}}", str(total_admins))
-        .replace("{{TRIAL_USERS}}", str(trial_users))
-        .replace("{{LICENSE_USERS}}", str(license_users))
-        .replace("{{USER_ROWS}}", "\n".join(user_rows))
-    )
-    return html
-
-
-@app.post("/admin/add-user")
-async def admin_add_user(
-    request: Request, username: str = Form(...), password: str = Form(...)
-):
-    if not is_password_configured():
-        return RedirectResponse(url="/setup")
-    token = _get_session(request)
-    if not verify_session_token(token or ""):
-        return RedirectResponse(url="/admin/login")
-    create_user(username, password, is_admin=False)
-    return RedirectResponse(url="/admin/users?success=added", status_code=302)
-
-
-@app.post("/admin/reset-trial")
-async def admin_reset_trial(request: Request, user_id: int = Form(...)):
-    if not is_password_configured():
-        return RedirectResponse(url="/setup")
-    token = _get_session(request)
-    if not verify_session_token(token or ""):
-        return RedirectResponse(url="/admin/login")
-    reset_user_trial(user_id)
-    return RedirectResponse(url="/admin/users?success=reset", status_code=302)
-
-
-@app.get("/login", response_class=HTMLResponse)
-async def login_page():
-    """Serve login form."""
-    if not is_password_configured():
-        return RedirectResponse(url="/setup")
-    return LOGIN_HTML
-
-
-@app.post("/login")
-async def login_post(password: str = Form(...)):
-    """Verify password (server-side bcrypt) and set session cookie."""
-    if not is_password_configured():
-        return RedirectResponse(url="/setup")
-    if not verify_password(password):
-        return RedirectResponse(url="/login?error=1", status_code=302)
-    token = create_session_token()
-    response = RedirectResponse(url="/", status_code=302)
-    response.set_cookie(
-        key=SESSION_COOKIE,
-        value=token,
-        httponly=True,
-        max_age=SESSION_MAX_AGE,
-        samesite="lax",
-    )
-    return response
-
-
-@app.get("/logout")
-async def logout():
-    """Clear session cookie and redirect to login."""
-    response = RedirectResponse(url="/login", status_code=302)
-    response.delete_cookie(SESSION_COOKIE)
-    return response
-
-
-async def _run_job(
-    job_id: str,
-    input_path: str,
-    safe_name: str,
-    use_api: bool,
-    api_token: Optional[str],
-    api_model: Optional[str],
-    api_resolution: Optional[str],
-    api_format: Optional[str],
-    quality: str,
-):
-    JOBS[job_id]["status"] = "running"
-    JOBS[job_id]["updated_at"] = time.time()
-    JOBS[job_id]["progress_percent"] = 0
-    JOBS[job_id]["current_stage"] = "starting"
-    JOBS[job_id]["current_stage_msg"] = "Starting processing..."
-    JOBS[job_id]["progress_log"] = []
-
-    def _progress_cb(stage: str, pct: int, msg: str):
-        """Called from the pipeline thread to update real-time progress."""
-        JOBS[job_id]["current_stage"] = stage
-        JOBS[job_id]["current_stage_msg"] = msg
-        JOBS[job_id]["progress_percent"] = max(0, min(100, pct))
-        JOBS[job_id]["updated_at"] = time.time()
-        JOBS[job_id].setdefault("progress_log", []).append(
-            {"stage": stage, "pct": pct, "msg": msg, "ts": time.time()}
-        )
-
-    try:
-        result = await run_pipeline_async(
-            input_path,
-            name=safe_name,
-            use_api=use_api,
-            api_token=api_token,
-            api_model=api_model,
-            api_resolution=api_resolution,
-            api_format=api_format,
-            quality=quality
-            if quality in ("draft", "standard", "high", "production")
-            else "standard",
-            progress_callback=_progress_cb,
-        )
-        base = "/download"
-        for key in ("obj", "stl", "glb", "fbx", "usdz"):
-            path = result.get(key)
-            if path:
-                name = Path(path).name
-                result[f"{key}_url"] = f"{base}?path={name}" if name else None
-            else:
-                result[f"{key}_url"] = None
-        if result.get("error") and not result.get("error_message"):
-            result["error_message"] = result["error"]
-
-        # Check if the pipeline returned an error dict (TripoSR failure
-        # caught internally by unified_pipeline)
-        if result.get("error_message"):
-            JOBS[job_id].update(
-                {
-                    "status": "error",
-                    "result": result,
-                    "error_message": result["error_message"],
-                    "updated_at": time.time(),
-                    "progress_percent": 0,
-                    "current_stage": "error",
-                    "current_stage_msg": result["error_message"][:150],
-                }
-            )
-        else:
-            JOBS[job_id].update(
-                {
-                    "status": "done",
-                    "result": result,
-                    "updated_at": time.time(),
-                    "progress_percent": 100,
-                    "current_stage": "done",
-                    "current_stage_msg": "Processing complete!",
-                }
-            )
-    except InsufficientBalanceError as e:
-        JOBS[job_id].update(
-            {"status": "error", "error_message": str(e), "updated_at": time.time()}
-        )
     except Exception as e:
-        JOBS[job_id].update(
-            {"status": "error", "error_message": str(e), "updated_at": time.time()}
-        )
-
-
-@app.get("/job/{job_id}")
-async def job_status(job_id: str, _auth: bool = Depends(require_session)):
-    job = JOBS.get(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    _prune_jobs()
-    payload = {"job_id": job_id, "status": job.get("status")}
-    if job.get("error_message"):
-        payload["error_message"] = job["error_message"]
-    if job.get("result"):
-        payload["result"] = job["result"]
-    # Real-time progress info
-    if job.get("progress_percent") is not None:
-        payload["progress_percent"] = job["progress_percent"]
-    if job.get("current_stage"):
-        payload["current_stage"] = job["current_stage"]
-    if job.get("current_stage_msg"):
-        payload["current_stage_msg"] = job["current_stage_msg"]
-    if job.get("progress_log"):
-        payload["progress_log"] = job["progress_log"]
-    return payload
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/generate")
 async def generate(
     request: Request,
-    file: UploadFile,
-    use_api: bool = Form(False),
+    image: UploadFile,
+    processing: str = Form("local"),
     api_token: Optional[str] = Form(None),
     api_model: Optional[str] = Form("hitem3dv1.5"),
     api_resolution: Optional[str] = Form("1024"),
-    api_format: Optional[str] = Form("glb"),
-    quality: str = Form("standard"),
-    _auth: bool = Depends(require_session),
+    api_format: Optional[str] = Form("obj"),
+    quality: Optional[str] = Form("standard"),
 ):
-    """
-    Generate 3D model from image with optional API processing.
+    """Start a new generation job."""
+    _prune_jobs()
 
-    Args:
-        file: Uploaded image file
-        use_api: Whether to use Cloud API
-        api_token: Cloud API token (required if use_api=True and no server credentials)
-        api_model: Cloud model to use
-        api_resolution: Output resolution
-        quality: Local mesh quality: draft, standard, high, production
-    """
-    if use_api:
-        credentials = resolve_hitem3d_credentials(api_token)
-        if not (
-            credentials["access_token"]
-            or (credentials["client_id"] and credentials["client_secret"])
-        ):
-            raise HTTPException(
-                status_code=400,
-                detail="Cloud API credentials are required when using Cloud API",
-            )
-        # Only validate token when user provided one (skip when using server-side credentials)
-        if api_token and api_token.strip():
-            if not await validate_api_token(api_token.strip()):
-                raise HTTPException(
-                    status_code=400, detail="Invalid Cloud API credentials"
-                )
-    else:
-        # Local processing with TripoSR - takes 5-15 minutes on CPU
-        try:
-            available_gb = psutil.virtual_memory().available / (1024**3)
-            if available_gb < 2.5:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Local processing requires at least 2.5GB available RAM. Please close other applications or use Cloud API.",
-                )
-        except HTTPException:
-            raise
-        except Exception:
-            pass
+    job_id = str(uuid.uuid4())
+    temp_path = Path(tempfile.gettempdir()) / f"{job_id}_{image.filename}"
 
-    os.makedirs("input", exist_ok=True)
-    original_name = Path(file.filename).name
-    base_name = os.path.splitext(original_name)[0]
-    safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", base_name).strip("._-") or "model"
-    input_path = f"input/{original_name}"
+    with open(temp_path, "wb") as f:
+        shutil.copyfileobj(image.file, f)
 
-    with open(input_path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
-
-    job_id = uuid.uuid4().hex
     JOBS[job_id] = {
+        "id": job_id,
         "status": "queued",
+        "input_path": str(temp_path),
+        "use_api": processing == "api",
+        "api_token": api_token,
+        "api_model": api_model,
+        "api_resolution": api_resolution,
+        "api_format": api_format,
+        "quality": quality,
         "created_at": time.time(),
         "updated_at": time.time(),
+        "progress_percent": 0,
+        "current_stage_msg": "Initializing...",
+        "progress_log": [],
+        "result": None,
     }
-    _prune_jobs()
-    asyncio.create_task(
-        _run_job(
-            job_id,
-            input_path,
-            safe_name,
-            use_api,
-            api_token,
-            api_model,
-            api_resolution,
-            api_format,
-            quality,
+
+    # Start processing in background
+    asyncio.create_task(_process_job(job_id))
+
+    return {"job_id": job_id}
+
+
+async def _process_job(job_id: str):
+    """Process a job asynchronously."""
+    job = JOBS[job_id]
+    job["status"] = "running"
+
+    def progress_callback(stage, pct, msg):
+        job["progress_percent"] = pct
+        job["current_stage_msg"] = msg
+        job["progress_log"].append({"stage": stage, "msg": msg, "ts": time.time()})
+        job["updated_at"] = time.time()
+
+    try:
+        result = await run_pipeline_async(
+            job["input_path"],
+            use_api=job["use_api"],
+            api_token=job["api_token"],
+            api_model=job["api_model"],
+            api_resolution=job["api_resolution"],
+            api_format=job["api_format"],
+            quality=job["quality"],
+            progress_callback=progress_callback,
         )
+
+        job["result"] = result
+        job["status"] = "done"
+    except Exception as e:
+        job["result"] = {"error": str(e)}
+        job["status"] = "error"
+
+    job["updated_at"] = time.time()
+
+
+@app.get("/job/{job_id}")
+async def get_job_status(job_id: str):
+    """Get the status of a job."""
+    job = JOBS.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    return {
+        "job_id": job_id,
+        "status": job["status"],
+        "progress_percent": job["progress_percent"],
+        "current_stage_msg": job["current_stage_msg"],
+        "current_stage": job["progress_log"][-1]["stage"]
+        if job["progress_log"]
+        else None,
+        "progress_log": job["progress_log"],
+        "result": job["result"],
+    }
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page():
+    """Render the login page."""
+    return HTMLResponse(
+        content="""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Login - Image → 3D Pro</title>
+        <style>
+            body {
+                font-family: "Segoe UI", system-ui, sans-serif;
+                background-color: #111111;
+                color: #e5e7eb;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                min-height: 100vh;
+                margin: 0;
+            }
+            .login-card {
+                background-color: #161616;
+                border: 1px solid #1e293b;
+                border-radius: 8px;
+                padding: 32px;
+                width: 100%;
+                max-width: 400px;
+            }
+            h1 {
+                color: #60a5fa;
+                font-size: 24px;
+                margin-bottom: 24px;
+                text-align: center;
+            }
+            input {
+                width: 100%;
+                padding: 12px;
+                margin-bottom: 16px;
+                border: 1px solid #334155;
+                border-radius: 6px;
+                background-color: #0f172a;
+                color: #e5e7eb;
+                font-size: 14px;
+            }
+            button {
+                width: 100%;
+                padding: 12px;
+                background: linear-gradient(135deg, #3b82f6, #2563eb);
+                border: none;
+                border-radius: 6px;
+                color: white;
+                font-weight: 600;
+                font-size: 14px;
+                cursor: pointer;
+            }
+            button:hover {
+                filter: brightness(1.1);
+            }
+            .error {
+                color: #ef4444;
+                font-size: 13px;
+                margin-bottom: 16px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="login-card">
+            <h1>🔒 Image → 3D Pro</h1>
+            <form method="POST" action="/login">
+                <input type="password" name="password" placeholder="Enter password" required />
+                <button type="submit">Login</button>
+            </form>
+        </div>
+    </body>
+    </html>
+    """
     )
-    return {"job_id": job_id, "status": "queued"}
 
 
-@app.post("/credentials/update")
-async def update_credentials(
-    token: str = Form(...), _auth: bool = Depends(require_session)
-):
-    raw = (token or "").strip()
-    if not raw:
-        raise HTTPException(status_code=400, detail="API token is required")
-    if not await validate_api_token(raw):
-        raise HTTPException(status_code=400, detail="Invalid Cloud API credentials")
-    save_hitem3d_credentials(raw)
-    return {"saved": True}
+@app.post("/login")
+async def do_login(request: Request, password: str = Form(...)):
+    """Handle login form submission."""
+    if verify_password(password):
+        token = create_session_token()
+        response = RedirectResponse(url="/", status_code=302)
+        response.set_cookie(
+            SESSION_COOKIE,
+            token,
+            max_age=SESSION_MAX_AGE,
+            httponly=True,
+            samesite="lax",
+        )
+        return response
+    return HTMLResponse(
+        content="""
+        <script>alert('Invalid password'); window.location.href='/login';</script>
+        """,
+        status_code=401,
+    )
+
+
+@app.get("/logout")
+async def logout():
+    """Logout and clear session."""
+    response = RedirectResponse(url="/login", status_code=302)
+    response.delete_cookie(SESSION_COOKIE)
+    return response
 
 
 @app.post("/hitem3d/balance")
-async def hitem3d_balance(
-    api_token: Optional[str] = Form(None), _auth: bool = Depends(require_session)
-):
-    result = await get_hitem3d_balance(api_token.strip() if api_token else None)
-    if result.get("error") == "credentials_missing":
-        raise HTTPException(
-            status_code=400,
-            detail="Cloud API credentials are required to check balance",
-        )
-    return {"available": result.get("available")}
+async def check_balance(api_token: Optional[str] = Form(None)):
+    """Check Hitem3D API balance."""
+    try:
+        credentials = resolve_hitem3d_credentials(api_token)
+        result = await get_hitem3d_balance(api_token or None)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.get("/download")
-async def download(path: str, request: Request, _auth: bool = Depends(require_session)):
-    """Serve a generated file from output/ by filename only (no path traversal)."""
-    if not path or ".." in path or "/" in path or "\\" in path:
-        raise HTTPException(status_code=400, detail="Invalid path")
-    full = (OUTPUT_DIR / path).resolve()
-    if not full.is_file() or OUTPUT_DIR not in full.parents:
-        raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(full, filename=full.name)
+if __name__ == "__main__":
+    import uvicorn
 
-
-@app.get("/models")
-async def get_models(request: Request, _auth: bool = Depends(require_session)):
-    """Get available processing models and options."""
-    return get_available_models()
-
-
-@app.post("/validate-token")
-async def validate_token(token: str):
-    """Validate Cloud API token."""
-    is_valid = await validate_api_token(token)
-    return {"valid": is_valid}
-
-
-@app.get("/credentials/availability")
-async def credentials_availability(
-    request: Request, _auth: bool = Depends(require_session)
-):
-    """Check if server-side Cloud API credentials are available."""
-    creds = resolve_hitem3d_credentials(None)
-    available = bool(
-        creds["access_token"] or (creds["client_id"] and creds["client_secret"])
-    )
-    return {"available": available}
+    uvicorn.run(app, host="0.0.0.0", port=8000)

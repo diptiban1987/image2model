@@ -310,12 +310,11 @@ class LicenseDialog(QDialog):
         progress = QProgressDialog("Validating license...", None, 0, 0, self)
         progress.setWindowModality(Qt.WindowModal)
         progress.show()
+        QApplication.processEvents()
         
         try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            result = loop.run_until_complete(self._validate_online(license_key))
-            loop.close()
+            # Sync call (Supabase client is synchronous)
+            result = self.license_manager.validate_license_online(license_key)
             
             progress.close()
             
@@ -326,8 +325,8 @@ class LicenseDialog(QDialog):
                     self,
                     "License Valid",
                     f"✅ License validated successfully!\n\n"
-                    f"Plan: {result['license'].plan_id}\n"
-                    f"Credits: {result['license'].credits}\n\n"
+                    f"Plan: {result['license'].get('plan_id', 'Unknown')}\n"
+                    f"Credits: {result['license'].get('credits', 'Unknown')}\n\n"
                     f"Click OK to start using ImageTo3D Pro."
                 )
                 self.accept()
@@ -339,16 +338,7 @@ class LicenseDialog(QDialog):
             logger.error(f"License validation error: {e}")
             self._show_error(f"Validation failed: {str(e)}")
     
-    async def _validate_online(self, license_key: str) -> dict:
-        """Validate license online."""
-        try:
-            return await self.license_manager.validate_license_online(license_key)
-        except Exception as e:
-            logger.error(f"Online validation failed: {e}")
-            return {
-                "valid": False,
-                "message": "Could not validate license. Please check your internet connection."
-            }
+    # Removed async _validate_online since manager function is synchronous now
     
     def _show_purchase_options(self):
         """Show purchase options dialog."""

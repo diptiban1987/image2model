@@ -608,6 +608,9 @@ def resolve_hitem3d_credentials(api_token: Optional[str]) -> Dict[str, Optional[
             "client_secret": client_secret,
         }
 
+    from core.secret_manager import get_secret
+    
+    # 1. Check Env Vars (Local override)
     access_token = (
         os.getenv("HITEM3D_ACCESS_TOKEN")
         or os.getenv("HITEM3D_API_TOKEN")
@@ -615,6 +618,16 @@ def resolve_hitem3d_credentials(api_token: Optional[str]) -> Dict[str, Optional[
     )
     client_id = os.getenv("HITEM3D_CLIENT_ID")
     client_secret = os.getenv("HITEM3D_CLIENT_SECRET")
+
+    # 2. Check Secret Manager (Supabase)
+    if not (access_token or (client_id and client_secret)):
+        # Try fetching from secure cloud config (requires license)
+        access_token = get_secret("TRIPO_API_KEY") or get_secret("HITEM3D_API_TOKEN")
+        
+        # If stored as separate ID/Secret
+        if not access_token:
+             client_id = get_secret("HITEM3D_CLIENT_ID")
+             client_secret = get_secret("HITEM3D_CLIENT_SECRET")
 
     base_dir = Path(__file__).resolve().parents[1]
 

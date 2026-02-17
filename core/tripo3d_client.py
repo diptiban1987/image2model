@@ -352,11 +352,20 @@ class Tripo3DClient:
             data = {"message": text}
 
         if response.status == 401:
+            error_msg = data.get("message", data.get("error", "")).lower()
+            if "expired" in error_msg or "login" in error_msg:
+                raise Tripo3DAuthError(
+                    "API key expired or invalid. Note: Free Wallet credits cannot be used via API. "
+                    "You need API Wallet credits (shown as 0/100 in your account). "
+                    "Please add paid credits or use Hitem3D API instead."
+                )
             raise Tripo3DAuthError("Invalid API key or authentication failed")
 
         if response.status == 402:
             raise Tripo3DInsufficientBalanceError(
-                "Insufficient balance. Please add credits to your Tripo3D account."
+                "Insufficient API Wallet balance. Note: Free Wallet credits (600 available) "
+                "cannot be used via API - only API Wallet credits work. "
+                "Please add credits to your API Wallet or use Hitem3D API instead."
             )
 
         if response.status == 429:
@@ -364,6 +373,14 @@ class Tripo3DClient:
 
         if not response.ok:
             error_msg = data.get("message", data.get("error", "Unknown error"))
+            # Improve error messages for common issues
+            error_lower = error_msg.lower()
+            if "expired" in error_lower or "login" in error_lower:
+                raise Tripo3DAuthError(
+                    "API authentication failed. Note: Free Wallet credits cannot be used via API. "
+                    "You have 600 Free Wallet credits but 0 API Wallet credits. "
+                    "Please add paid credits to your API Wallet or use Hitem3D API instead."
+                )
             raise Tripo3DError(f"API error ({response.status}): {error_msg}")
 
         return data

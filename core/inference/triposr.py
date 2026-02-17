@@ -295,13 +295,15 @@ class TripoSR:
             raise TripoSRError(
                 f"TripoSR subprocess failed with exit code {returncode}. "
                 f"This typically means the model ran out of memory or a "
-                f"dependency is missing. Use the Cloud API for reliable results.\n"
-                f"Details: {stderr_text[-800:]}",
+                f"This typically means the model ran out of memory or a dependency is missing.\n"
+                f"STDOUT:\n{stdout_text[-1000:]}\n"
+                f"STDERR:\n{stderr_text[-1000:]}",
                 reason="subprocess_crash",
                 details={
                     "returncode": returncode,
                     "stderr": stderr_text[-2000:],
-                    "stdout": stdout_text[-500:],
+                    "stdout": stdout_text[-1000:],
+                    "cmd": cmd,
                 },
             )
 

@@ -503,9 +503,13 @@ class PipelineWorker(QThread):
                 progress_callback=_progress_cb,
             )
 
-            _log_event("Processing completed successfully")
-            self.progress.emit(100, "Complete!")
-            self.finished.emit(result)
+            if result.get("error"):
+                _log_event(f"Error: {result['error']}")
+                self.failed.emit(result['error'])
+            else:
+                _log_event("Processing completed successfully")
+                self.progress.emit(100, "Complete!")
+                self.finished.emit(result)
         except Exception as exc:
             self.log_event.emit(f"Error: {str(exc)}")
             self.failed.emit(str(exc))
@@ -563,8 +567,11 @@ class MultiAngleWorker(QThread):
                 api_format=self.api_format,
                 quality=self.quality,
             )
-            self.progress.emit(100, "Complete!")
-            self.finished.emit(result)
+            if result.get("error"):
+                 self.failed.emit(result["error"])
+            else:
+                 self.progress.emit(100, "Complete!")
+                 self.finished.emit(result)
         except Exception as exc:
             self.failed.emit(str(exc))
 

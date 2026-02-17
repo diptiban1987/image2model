@@ -1452,8 +1452,17 @@ async def _process_job(job_id: str):
             progress_callback=progress_callback,
         )
 
-        job["result"] = result
-        job["status"] = "done"
+        if result.get("error"):
+            job["result"] = result
+            job["status"] = "error"
+            # Add error to log if not already there
+            err_msg = result["error"]
+            if not job["progress_log"] or job["progress_log"][-1]["msg"] != err_msg:
+                 job["progress_log"].append({"stage": "error", "msg": f"❌ Error: {err_msg}", "ts": time.time()})
+        else:
+            job["result"] = result
+            job["status"] = "done"
+
     except Exception as e:
         job["result"] = {"error": str(e)}
         job["status"] = "error"
@@ -1478,6 +1487,7 @@ async def get_job_status(job_id: str):
         else None,
         "progress_log": job["progress_log"],
         "result": job["result"],
+        "error": job.get("result", {}).get("error") if job.get("result") else None,
     }
 
 

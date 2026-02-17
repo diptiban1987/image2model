@@ -14,7 +14,7 @@ fastapi
 uvicorn[standard]
 pyside6>=6.5
 tqdm
-rembg
+rembg[cpu]
 onnxruntime
 psutil
 httpx

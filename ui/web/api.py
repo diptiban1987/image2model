@@ -6,6 +6,7 @@ from fastapi.responses import (
     RedirectResponse,
     Response,
 )
+from fastapi.staticfiles import StaticFiles
 import shutil
 import os
 import re
@@ -53,11 +54,15 @@ from core.user_db import (
     get_user_credits as db_get_user_credits,
     deduct_user_credits as db_deduct_user_credits,
 )
+from config.settings import get_output_dir
 
 app = FastAPI()
 
-OUTPUT_DIR = Path("output").resolve()
+OUTPUT_DIR = get_output_dir()
 SESSION_COOKIE = "imagetoad_session"
+
+# Mount static files directory for serving output files
+app.mount("/output", StaticFiles(directory=str(OUTPUT_DIR)), name="output")
 SESSION_MAX_AGE = 24 * 3600
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RETENTION_SECONDS = 6 * 3600
@@ -1458,7 +1463,9 @@ async def _process_job(job_id: str):
             # Add error to log if not already there
             err_msg = result["error"]
             if not job["progress_log"] or job["progress_log"][-1]["msg"] != err_msg:
-                 job["progress_log"].append({"stage": "error", "msg": f"❌ Error: {err_msg}", "ts": time.time()})
+                job["progress_log"].append(
+                    {"stage": "error", "msg": f"❌ Error: {err_msg}", "ts": time.time()}
+                )
         else:
             job["result"] = result
             job["status"] = "done"

@@ -15,6 +15,7 @@ from enum import Enum
 from dataclasses import dataclass
 import time
 import json
+from config.settings import get_output_dir
 
 
 class APIPlatform(Enum):
@@ -238,7 +239,7 @@ class Unified3DAPI:
     async def generate_from_image(
         self,
         image_path: str,
-        output_dir: str = "output",
+        output_dir: str = None,
         model_name: str = "model",
         quality: str = "standard",
         format_type: str = "glb",
@@ -250,7 +251,7 @@ class Unified3DAPI:
 
         Args:
             image_path: Path to input image
-            output_dir: Directory to save output
+            output_dir: Directory to save output (default: user Documents folder)
             model_name: Base name for output file
             quality: Quality preset (draft, standard, high, production)
             format_type: Output format (obj, glb, stl, fbx, usdz)
@@ -260,6 +261,10 @@ class Unified3DAPI:
         Returns:
             GenerationResult with success status and paths
         """
+        # Use user-writable output directory if not specified
+        if output_dir is None:
+            output_dir = str(get_output_dir())
+
         platform = await self._detect_best_platform()
 
         if platform == APIPlatform.NONE:
@@ -544,7 +549,7 @@ class Unified3DAPI:
         self,
         prompt: str,
         negative_prompt: str = "",
-        output_dir: str = "output",
+        output_dir: str = None,
         model_name: str = "model",
         format_type: str = "glb",
         progress_callback=None,
@@ -556,7 +561,7 @@ class Unified3DAPI:
         Args:
             prompt: Text description of the 3D model to generate
             negative_prompt: Things to avoid in generation
-            output_dir: Directory to save output
+            output_dir: Directory to save output (default: user Documents folder)
             model_name: Base name for output file
             format_type: Output format (obj, glb, stl, fbx, usdz)
             progress_callback: Optional callback(percent, message)
@@ -565,6 +570,10 @@ class Unified3DAPI:
         Returns:
             GenerationResult with success status and paths
         """
+        # Use user-writable output directory if not specified
+        if output_dir is None:
+            output_dir = str(get_output_dir())
+
         platform = await self._detect_best_platform()
         platform_display = "Cloud Processing"
 
@@ -641,7 +650,7 @@ class Unified3DAPI:
     async def generate_from_multiview(
         self,
         image_paths: List[str],
-        output_dir: str = "output",
+        output_dir: str = None,
         model_name: str = "model",
         format_type: str = "glb",
         progress_callback=None,
@@ -652,7 +661,7 @@ class Unified3DAPI:
 
         Args:
             image_paths: List of paths to images (front, side, back views)
-            output_dir: Directory to save output
+            output_dir: Directory to save output (default: user Documents folder)
             model_name: Base name for output file
             format_type: Output format (obj, glb, stl, fbx, usdz)
             progress_callback: Optional callback(percent, message)
@@ -661,6 +670,10 @@ class Unified3DAPI:
         Returns:
             GenerationResult with success status and paths
         """
+        # Use user-writable output directory if not specified
+        if output_dir is None:
+            output_dir = str(get_output_dir())
+
         platform = await self._detect_best_platform()
         platform_display = "Cloud Processing"
 
@@ -862,7 +875,7 @@ class Hitem3DAPI(Unified3DAPI):
 
 # Convenience function for quick access
 async def generate_3d_from_image(
-    credential_string: str, image_path: str, output_dir: str = "output", **kwargs
+    credential_string: str, image_path: str, output_dir: str = None, **kwargs
 ) -> GenerationResult:
     """
     Quick generation function.
@@ -870,12 +883,16 @@ async def generate_3d_from_image(
     Args:
         credential_string: API key or "client_id:secret" format
         image_path: Path to input image
-        output_dir: Output directory
+        output_dir: Output directory (default: user Documents folder)
         **kwargs: Additional options (quality, format_type, etc.)
 
     Returns:
         GenerationResult
     """
+    # Use user-writable output directory if not specified
+    if output_dir is None:
+        output_dir = str(get_output_dir())
+
     credentials = APICredentials.from_string(credential_string)
     api = Unified3DAPI(credentials=credentials)
 

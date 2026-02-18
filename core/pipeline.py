@@ -10,6 +10,7 @@ import trimesh
 from core.inference.model_manager import ModelManager
 from core.postprocess.cleanup import clean_mesh
 from core.exporter import export_mesh
+from config.settings import get_output_dir
 
 
 # Quality presets: "draft" = fast cleanup only; others use AdvancedMeshProcessor
@@ -19,7 +20,7 @@ QUALITY_LEVELS = ("draft", "standard", "high", "production")
 def run_pipeline(
     image,
     name: str = "model",
-    output_dir: str = "output",
+    output_dir: str = None,
     quality: str = "standard",
     scale: float = 1.0,
     colorize_from_image: bool = True,
@@ -31,7 +32,7 @@ def run_pipeline(
     Args:
         image: Input image path or loaded image for inference.
         name: Base name for output files (no extension).
-        output_dir: Directory for OBJ, STL, GLB outputs.
+        output_dir: Directory for OBJ, STL, GLB outputs (default: user Documents folder).
         quality: Mesh quality preset: "draft", "standard", "high", "production".
                  "draft" = fast cleanup only; others use advanced mesh processing.
         scale: Scale factor applied to mesh before export (default 1.0).
@@ -41,6 +42,11 @@ def run_pipeline(
     """
     if quality not in QUALITY_LEVELS:
         quality = "standard"
+
+    # Use user-writable output directory if not specified
+    if output_dir is None:
+        output_dir = str(get_output_dir())
+
     os.makedirs(output_dir, exist_ok=True)
 
     t0 = time.perf_counter()
@@ -56,16 +62,22 @@ def run_pipeline(
     manager = ModelManager()
 
     t_infer_start = time.perf_counter()
-    _report("load_and_infer", 5, "Loading image and running 3D inference (this is the longest stage)...")
+    _report(
+        "load_and_infer",
+        5,
+        "Loading image and running 3D inference (this is the longest stage)...",
+    )
 
     # Start a heartbeat thread to update progress during the long inference
     # (TripoSR subprocess blocks for 2-5+ minutes with no output)
     import threading
+
     _infer_done = threading.Event()
 
     def _heartbeat():
         """Gradually increment progress from 5% → 60% over time."""
         import math
+
         start = time.perf_counter()
         while not _infer_done.is_set():
             elapsed = time.perf_counter() - start
@@ -75,8 +87,9 @@ def run_pipeline(
             minutes = int(elapsed // 60)
             secs = int(elapsed % 60)
             _report(
-                "load_and_infer", round(pct, 1),
-                f"TripoSR processing... ({minutes}m {secs:02d}s elapsed)"
+                "load_and_infer",
+                round(pct, 1),
+                f"TripoSR processing... ({minutes}m {secs:02d}s elapsed)",
             )
             if _infer_done.wait(timeout=15):  # Update every 15 seconds
                 break
@@ -95,33 +108,52 @@ def run_pipeline(
     if isinstance(infer_result, dict) and "mesh" in infer_result:
         mesh = infer_result["mesh"]
         fallback_info = {k: v for k, v in infer_result.items() if k != "mesh"}
-        textured_assets = infer_result.get("textured_assets") if isinstance(infer_result.get("textured_assets"), dict) else None
+        textured_assets = (
+            infer_result.get("textured_assets")
+            if isinstance(infer_result.get("textured_assets"), dict)
+            else None
+        )
     else:
         mesh = infer_result
     t_infer_end = time.perf_counter()
-    _report("load_and_infer_done", 75, f"Inference complete ({round(t_infer_end - t_infer_start, 1)}s). Preparing mesh...")
+    _report(
+        "load_and_infer_done",
+        75,
+        f"Inference complete ({round(t_infer_end - t_infer_start, 1)}s). Preparing mesh...",
+    )
 
     t_cleanup_start = time.perf_counter()
     if textured_assets:
         _report("cleanup", 80, "Textured assets available, skipping mesh cleanup...")
         t_cleanup_end = time.perf_counter()
     else:
-        _report("cleanup", 78, "Cleaning raw mesh (removing noise vertices, degenerate faces)...")
+        _report(
+            "cleanup",
+            78,
+            "Cleaning raw mesh (removing noise vertices, degenerate faces)...",
+        )
         mesh = clean_mesh(mesh)
         if quality != "draft":
-            _report("advanced_processing", 82, f"Running advanced mesh processor (quality: {quality})...")
+            _report(
+                "advanced_processing",
+                82,
+                f"Running advanced mesh processor (quality: {quality})...",
+            )
             from core.postprocess.advanced_mesh_processor import (
                 AdvancedMeshProcessor,
                 ProcessingConfig,
                 MeshQualityLevel,
             )
+
             level = MeshQualityLevel(quality)
             config = ProcessingConfig(quality_level=level)
             if quality in ("high", "production"):
                 config.repair_holes = False
             processor = AdvancedMeshProcessor(config)
             mesh = processor.process(mesh)
-            _report("advanced_processing_done", 88, "Advanced mesh processing complete.")
+            _report(
+                "advanced_processing_done", 88, "Advanced mesh processing complete."
+            )
         t_cleanup_end = time.perf_counter()
 
     if colorize_from_image and not textured_assets:
@@ -135,10 +167,18 @@ def run_pipeline(
                 textured_assets = texture_result
                 _report("texture_gen_done", 92, "Texture generated successfully.")
             else:
-                _report("texture_gen_skip", 92, "Texture generation skipped (vertex colors only).")
+                _report(
+                    "texture_gen_skip",
+                    92,
+                    "Texture generation skipped (vertex colors only).",
+                )
         except Exception as tex_err:
             print(f"[Pipeline] Texture generation failed (non-fatal): {tex_err}")
-            _report("texture_gen_skip", 92, "Texture generation failed, using vertex colors.")
+            _report(
+                "texture_gen_skip",
+                92,
+                "Texture generation failed, using vertex colors.",
+            )
 
     t_export_start = time.perf_counter()
     _report("export", 93, f"Exporting 3D files (OBJ, STL, GLB) to {output_dir}...")
@@ -148,7 +188,9 @@ def run_pipeline(
     if textured_assets and textured_assets.get("obj"):
         obj_src = Path(textured_assets["obj"])
         mtl_src = Path(textured_assets["mtl"]) if textured_assets.get("mtl") else None
-        tex_src = Path(textured_assets["texture"]) if textured_assets.get("texture") else None
+        tex_src = (
+            Path(textured_assets["texture"]) if textured_assets.get("texture") else None
+        )
         obj_path = os.path.join(output_dir, f"{name}.obj")
         mtl_name = f"{name}.mtl"
         tex_name = tex_src.name if tex_src else None
@@ -222,12 +264,15 @@ def _detect_background_and_dominant(arr_float):
     h, w = arr_float.shape[:2]
     # Sample corner pixels (5×5 patches at each corner)
     patch = 5
-    corners = np.concatenate([
-        arr_float[:patch, :patch].reshape(-1, 3),
-        arr_float[:patch, -patch:].reshape(-1, 3),
-        arr_float[-patch:, :patch].reshape(-1, 3),
-        arr_float[-patch:, -patch:].reshape(-1, 3),
-    ], axis=0)
+    corners = np.concatenate(
+        [
+            arr_float[:patch, :patch].reshape(-1, 3),
+            arr_float[:patch, -patch:].reshape(-1, 3),
+            arr_float[-patch:, :patch].reshape(-1, 3),
+            arr_float[-patch:, -patch:].reshape(-1, 3),
+        ],
+        axis=0,
+    )
     bg_color = np.median(corners, axis=0)  # robust estimate
 
     # Foreground mask: pixels that differ from background by threshold
@@ -257,6 +302,7 @@ def _apply_vertex_colors_from_image(mesh, image_path):
     try:
         from PIL import Image
         import open3d as o3d
+
         img = Image.open(image_path).convert("RGB")
         arr = np.asarray(img).astype(np.float64) / 255.0
         if arr.ndim != 3:
@@ -294,13 +340,13 @@ def _apply_vertex_colors_from_image(mesh, image_path):
 
         # Project from 3 orthographic views:
         front_colors = _sample(normalized[:, 0], normalized[:, 1])  # XY
-        side_colors = _sample(normalized[:, 2], normalized[:, 1])   # ZY
-        top_colors = _sample(normalized[:, 0], normalized[:, 2])    # XZ
+        side_colors = _sample(normalized[:, 2], normalized[:, 1])  # ZY
+        top_colors = _sample(normalized[:, 0], normalized[:, 2])  # XZ
 
         # Weight by normal alignment (abs for both directions)
         w_front = np.abs(normals[:, 2])  # |Nz|
-        w_side = np.abs(normals[:, 0])   # |Nx|
-        w_top = np.abs(normals[:, 1])    # |Ny|
+        w_side = np.abs(normals[:, 0])  # |Nx|
+        w_top = np.abs(normals[:, 1])  # |Ny|
 
         total = w_front + w_side + w_top
         total[total == 0] = 1.0
@@ -312,7 +358,9 @@ def _apply_vertex_colors_from_image(mesh, image_path):
         colors = np.clip(colors, 0.0, 1.0)
 
         mesh.vertex_colors = o3d.utility.Vector3dVector(colors)
-        print(f"[Pipeline] Vertex colors applied (bg={bg_color.round(2)}, fg={fg_color.round(2)})")
+        print(
+            f"[Pipeline] Vertex colors applied (bg={bg_color.round(2)}, fg={fg_color.round(2)})"
+        )
         return mesh
     except Exception as e:
         print(f"[Pipeline] Vertex color failed: {e}")
@@ -411,11 +459,11 @@ def _generate_texture_for_mesh(mesh, image_path, output_dir, name):
         # Determine atlas region and compute source UV
         img_u = np.where(
             u_grid < 1.0 / 3.0,
-            u_grid * 3.0,                       # front region
+            u_grid * 3.0,  # front region
             np.where(
                 u_grid < 2.0 / 3.0,
-                (u_grid - 1.0 / 3.0) * 3.0,    # side region
-                (u_grid - 2.0 / 3.0) * 3.0,     # top region
+                (u_grid - 1.0 / 3.0) * 3.0,  # side region
+                (u_grid - 2.0 / 3.0) * 3.0,  # top region
             ),
         )
         img_v = v_grid  # same for all regions
@@ -513,7 +561,11 @@ def _rewrite_mtl_texture(mtl_path: str, texture_name: str) -> None:
         replaced = False
         for line in lines:
             low = line.lower()
-            if low.startswith("map_kd ") or low.startswith("map_ka ") or low.startswith("map_ke "):
+            if (
+                low.startswith("map_kd ")
+                or low.startswith("map_ka ")
+                or low.startswith("map_ke ")
+            ):
                 updated.append(f"map_Kd {texture_name}\n")
                 replaced = True
             else:

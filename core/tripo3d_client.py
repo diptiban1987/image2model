@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from datetime import datetime
 import aiohttp
+from config.settings import get_output_dir
 import aiofiles
 
 from core.logger import get_logger, log_exception
@@ -754,7 +755,7 @@ class Tripo3DClient:
             Dictionary mapping format to file path
         """
         if output_dir is None:
-            output_dir = Path(os.getcwd()) / "output"
+            output_dir = get_output_dir()
         else:
             output_dir = Path(output_dir)
 

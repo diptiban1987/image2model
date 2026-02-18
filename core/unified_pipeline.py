@@ -9,6 +9,7 @@ import json
 from datetime import datetime
 
 from core.hitem3d_api import Hitem3DAPI
+from config.settings import get_output_dir
 
 
 def run_pipeline(
@@ -19,7 +20,7 @@ def run_pipeline(
     api_model: str = "hitem3dv1.5",
     api_resolution: str = "1024",
     api_format: str = "glb",
-    output_dir: str = "output",
+    output_dir: str = None,
     quality: str = "standard",
     scale: float = 1.0,
     **kwargs,
@@ -34,7 +35,7 @@ def run_pipeline(
         api_token: Cloud API access token (required if use_api=True)
         api_model: Cloud model to use (standard, high_quality, etc.)
         api_resolution: Output resolution for API (512, 1024, 1536, 1536pro)
-        output_dir: Output directory for local pipeline (default "output")
+        output_dir: Output directory for local pipeline (default: user Documents folder)
         quality: Local mesh quality: "draft", "standard", "high", "production"
         scale: Scale factor for exported mesh (local only)
         **kwargs: Additional arguments passed to local pipeline or API
@@ -42,6 +43,10 @@ def run_pipeline(
     Returns:
         Dict with paths to generated files and processing stats
     """
+    # Use user-writable output directory if not specified
+    if output_dir is None:
+        output_dir = str(get_output_dir())
+
     if use_api:
         credentials = resolve_hitem3d_credentials(api_token)
         if not (
@@ -79,7 +84,7 @@ async def run_pipeline_async(
     api_model: str = "hitem3dv1.5",
     api_resolution: str = "1024",
     api_format: str = "glb",
-    output_dir: str = "output",
+    output_dir: str = None,
     quality: str = "standard",
     scale: float = 1.0,
     progress_callback=None,
@@ -88,6 +93,10 @@ async def run_pipeline_async(
     """
     Async-safe pipeline entrypoint for FastAPI.
     """
+    # Use user-writable output directory if not specified
+    if output_dir is None:
+        output_dir = str(get_output_dir())
+
     if use_api:
         credentials = resolve_hitem3d_credentials(api_token)
         if not (
@@ -120,7 +129,7 @@ async def run_pipeline_async(
 def _run_local_pipeline(
     image_path: str,
     name: str,
-    output_dir: str = "output",
+    output_dir: str = None,
     quality: str = "standard",
     scale: float = 1.0,
     progress_callback=None,
@@ -140,6 +149,10 @@ def _run_local_pipeline(
     Returns:
         Dict with paths and stats
     """
+    # Use user-writable output directory if not specified
+    if output_dir is None:
+        output_dir = str(get_output_dir())
+
     t0 = time.perf_counter()
     try:
         from core.pipeline import run_pipeline as local_pipeline
@@ -323,9 +336,10 @@ async def _run_api_pipeline(
 
     try:
         # Generate 3D model using API - always use GLB as primary format for best quality
+        output_dir = str(get_output_dir())
         result = await api.generate_3d_model(
             image_path=image_path,
-            output_dir="output",
+            output_dir=output_dir,
             model_name=name,
             model=api_model,
             resolution=api_resolution,
@@ -347,7 +361,6 @@ async def _run_api_pipeline(
                     break
 
         if glb_path and os.path.exists(glb_path):
-            output_dir = "output"
             base_name = name
 
             try:
@@ -609,7 +622,7 @@ def resolve_hitem3d_credentials(api_token: Optional[str]) -> Dict[str, Optional[
         }
 
     from core.secret_manager import get_secret
-    
+
     # 1. Check Env Vars (Local override)
     access_token = (
         os.getenv("HITEM3D_ACCESS_TOKEN")
@@ -623,11 +636,11 @@ def resolve_hitem3d_credentials(api_token: Optional[str]) -> Dict[str, Optional[
     if not (access_token or (client_id and client_secret)):
         # Try fetching from secure cloud config (requires license)
         access_token = get_secret("TRIPO_API_KEY") or get_secret("HITEM3D_API_TOKEN")
-        
+
         # If stored as separate ID/Secret
         if not access_token:
-             client_id = get_secret("HITEM3D_CLIENT_ID")
-             client_secret = get_secret("HITEM3D_CLIENT_SECRET")
+            client_id = get_secret("HITEM3D_CLIENT_ID")
+            client_secret = get_secret("HITEM3D_CLIENT_SECRET")
 
     base_dir = Path(__file__).resolve().parents[1]
 

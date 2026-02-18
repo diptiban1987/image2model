@@ -59,11 +59,22 @@ class LicenseManager:
     Allows ONE free generation before requiring license.
     """
 
-    LICENSE_FILE = Path("config/license.json")
-    TRIAL_FILE = Path("config/trial.json")
     OFFLINE_GRACE_DAYS = 7
 
     def __init__(self):
+        # Use user-writable location for config files
+        import os
+
+        app_data = (
+            os.environ.get("LOCALAPPDATA")
+            or os.environ.get("APPDATA")
+            or str(Path.home())
+        )
+        config_dir = Path(app_data) / "ImageTo3D Pro" / "config"
+
+        self.LICENSE_FILE = config_dir / "license.json"
+        self.TRIAL_FILE = config_dir / "trial.json"
+
         self._current_license: Optional[LicenseData] = None
         self._trial_data: Optional[TrialData] = None
         self._hardware_fp = self._generate_hardware_fingerprint()
@@ -256,37 +267,42 @@ class LicenseManager:
         try:
             client = get_supabase()
             if not client:
-                 return {"valid": False, "message": "Connection failed. Could not reach server."}
+                return {
+                    "valid": False,
+                    "message": "Connection failed. Could not reach server.",
+                }
 
-            logger.info(f"Validating license with Supabase: {license_key} on device {self._hardware_fp}")
-            
+            logger.info(
+                f"Validating license with Supabase: {license_key} on device {self._hardware_fp}"
+            )
+
             # Call secure RPC function
             # P.S. We don't use direct table access for security
-            response = client.rpc("validate_license", {
-                "p_license_key": license_key,
-                "p_device_id": self._hardware_fp
-            }).execute()
-            
+            response = client.rpc(
+                "validate_license",
+                {"p_license_key": license_key, "p_device_id": self._hardware_fp},
+            ).execute()
+
             # Response.data is the JSON returned by Postgres function
             result = response.data
-            
+
             if not result:
-                 return {"valid": False, "message": "Empty response from server."}
+                return {"valid": False, "message": "Empty response from server."}
 
             if result.get("valid"):
                 return {
                     "valid": True,
                     "license": {
-                        "user_id": "supabase_user", # Placeholder or could be added to DB
+                        "user_id": "supabase_user",  # Placeholder or could be added to DB
                         "plan_id": result.get("plan", "starter"),
-                        "credits": 999999, # Managed by API limits or DB? For now unlimited on valid license
+                        "credits": 999999,  # Managed by API limits or DB? For now unlimited on valid license
                     },
-                    "message": result.get("message", "License validated successfully")
+                    "message": result.get("message", "License validated successfully"),
                 }
             else:
                 return {
                     "valid": False,
-                    "message": result.get("message", "Invalid license")
+                    "message": result.get("message", "Invalid license"),
                 }
 
         except Exception as e:
@@ -305,24 +321,42 @@ class LicenseManager:
             if is_admin:
                 expires_at = datetime.utcnow() + timedelta(days=3650)
             else:
-                 # Check if license_obj has an expiration or default to 30 days
-                 obj_exp = license_obj.get("expires_at") if isinstance(license_obj, dict) else getattr(license_obj, "expires_at", None)
-                 
-                 if obj_exp:
-                     if isinstance(obj_exp, str):
+                # Check if license_obj has an expiration or default to 30 days
+                obj_exp = (
+                    license_obj.get("expires_at")
+                    if isinstance(license_obj, dict)
+                    else getattr(license_obj, "expires_at", None)
+                )
+
+                if obj_exp:
+                    if isinstance(obj_exp, str):
                         try:
-                             expires_at = datetime.fromisoformat(obj_exp.replace("Z", "+00:00"))
+                            expires_at = datetime.fromisoformat(
+                                obj_exp.replace("Z", "+00:00")
+                            )
                         except ValueError:
-                             expires_at = datetime.utcnow() + timedelta(days=30)
-                     else:
+                            expires_at = datetime.utcnow() + timedelta(days=30)
+                    else:
                         expires_at = obj_exp
-                 else:
-                     expires_at = datetime.utcnow() + timedelta(days=30)
+                else:
+                    expires_at = datetime.utcnow() + timedelta(days=30)
 
             # Extract fields safely (dict or object)
-            user_id = license_obj.get("user_id", "local_user") if isinstance(license_obj, dict) else getattr(license_obj, "user_id", "local_user")
-            plan_id = license_obj.get("plan_id", "starter") if isinstance(license_obj, dict) else getattr(license_obj, "plan_id", "starter")
-            credits = license_obj.get("credits", 0) if isinstance(license_obj, dict) else getattr(license_obj, "credits", 0)
+            user_id = (
+                license_obj.get("user_id", "local_user")
+                if isinstance(license_obj, dict)
+                else getattr(license_obj, "user_id", "local_user")
+            )
+            plan_id = (
+                license_obj.get("plan_id", "starter")
+                if isinstance(license_obj, dict)
+                else getattr(license_obj, "plan_id", "starter")
+            )
+            credits = (
+                license_obj.get("credits", 0)
+                if isinstance(license_obj, dict)
+                else getattr(license_obj, "credits", 0)
+            )
 
             self._current_license = LicenseData(
                 key=license_key,

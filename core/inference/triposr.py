@@ -6,6 +6,9 @@ from pathlib import Path
 import open3d as o3d
 import psutil
 
+# Import output directory helper
+from config.settings import get_output_dir
+
 
 class TripoSRError(RuntimeError):
     """Raised when TripoSR cannot generate a valid mesh."""
@@ -201,11 +204,11 @@ class TripoSR:
         if not os.path.exists(image_path):
             raise FileNotFoundError(f"Input image not found: {image_path}")
 
-        # Use a deterministic subfolder under output so repeated runs are
+        # Use a deterministic subfolder under user output directory so repeated runs are
         # reusable and users can inspect intermediate artefacts.
         # CRITICAL: must be absolute so subprocess (cwd=repo_root) and our
         # file-existence check both resolve to the same location.
-        project_output = Path("output").resolve() / "triposr_direct"
+        project_output = get_output_dir() / "triposr_direct"
         project_output.mkdir(parents=True, exist_ok=True)
         tmp_dir = project_output
 

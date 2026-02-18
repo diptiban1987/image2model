@@ -171,6 +171,41 @@ class ConfigManager:
 config = ConfigManager()
 
 
+def get_output_dir() -> Path:
+    """
+    Get the user-writable output directory for 3D models.
+
+    Returns a path in the user's Documents folder to avoid permission issues
+    when the app is installed in restricted locations (Program Files).
+
+    Returns:
+        Path to the output directory (created if it doesn't exist)
+    """
+    # Use user's Documents folder for cross-platform compatibility
+    if os.name == "nt":  # Windows
+        docs_path = Path.home() / "Documents"
+    else:  # macOS/Linux
+        docs_path = Path.home() / "Documents"
+
+    # Fallback to home directory if Documents doesn't exist
+    if not docs_path.exists():
+        docs_path = Path.home()
+
+    output_dir = docs_path / "ImageTo3D_Pro_Output"
+
+    # Create the directory if it doesn't exist
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+    except PermissionError:
+        # Fallback to a temp directory if Documents is not writable
+        import tempfile
+
+        output_dir = Path(tempfile.gettempdir()) / "ImageTo3D_Pro_Output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+    return output_dir
+
+
 # Convenience exports
 __all__ = [
     "config",
@@ -179,4 +214,5 @@ __all__ = [
     "APIConfig",
     "UIConfig",
     "SecurityConfig",
+    "get_output_dir",
 ]

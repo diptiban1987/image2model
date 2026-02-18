@@ -9,6 +9,7 @@ import zipfile
 import argparse
 from typing import Optional, Dict, Any
 from pathlib import Path
+from config.settings import get_output_dir
 
 
 class InsufficientBalanceError(Exception):
@@ -388,7 +389,7 @@ class Hitem3DAPI:
     async def generate_3d_model(
         self,
         image_path: str,
-        output_dir: str = "output",
+        output_dir: str = None,
         model_name: str = "model",
         **kwargs,
     ) -> Dict[str, str]:
@@ -397,13 +398,17 @@ class Hitem3DAPI:
 
         Args:
             image_path: Path to input image
-            output_dir: Directory to save outputs
+            output_dir: Directory to save outputs (default: user Documents folder)
             model_name: Base name for output files
             **kwargs: Additional arguments for create_task
 
         Returns:
             Dict with paths to generated files
         """
+        # Use user-writable output directory if not specified
+        if output_dir is None:
+            output_dir = str(get_output_dir())
+
         # Extract progress_callback before passing to create_task
         progress_callback = kwargs.pop("progress_callback", None)
 
@@ -575,7 +580,11 @@ class Hitem3DAPI:
         return True
 
 
-def repair_output_dir(output_dir: str = "output") -> Dict[str, int]:
+def repair_output_dir(output_dir: str = None) -> Dict[str, int]:
+    # Use user-writable output directory if not specified
+    if output_dir is None:
+        output_dir = str(get_output_dir())
+
     exts = {".obj", ".stl", ".glb", ".fbx", ".usdz"}
     fixed = 0
     skipped = 0
@@ -608,7 +617,7 @@ def _main() -> None:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("repair-output")
-    p.add_argument("--dir", default="output")
+    p.add_argument("--dir", default=str(get_output_dir()))
     args = parser.parse_args()
     if args.cmd == "repair-output":
         result = repair_output_dir(args.dir)

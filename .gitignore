@@ -12,3 +12,29 @@ __pycache__/
 *.pyc
 
 nul
+
+# Desktop & Build files
+.env
+ui/desktop/
+installer/
+ImageTo3DPro.spec
+ImageTo3DPro_onefile.spec
+build_all.bat
+build_app.ps1
+build_complete.bat
+build_complete.py
+build_exe.bat
+build_exe.py
+update_desktop_logo.py
+test_license.py
+
+# Logs & Docs
+build_log.txt
+server.log
+logs/
+BUILD_COMPLETE_GUIDE.md
+BUILD_GUIDE.md
+IMPROVEMENTS_SUMMARY.md
+INSTALLER_GUIDE.md
+USER_WORKFLOW_GUIDE.md
+progress.md

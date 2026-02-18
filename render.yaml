@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: imageto3d-pro
+    name: imageto3d-pro-web
     runtime: python
     region: oregon
     plan: free

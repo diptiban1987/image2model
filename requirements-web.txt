@@ -1,0 +1,28 @@
+# ImageTo3D Pro - Web Dependencies
+# Optimized for Render deployment (excludes PySide6/PyInstaller)
+
+# Tripo3D API Client (Official Python SDK)
+tripo3d>=0.3.10
+bcrypt>=4.0,<5
+torch>=2.0,<3.0
+torchvision
+numpy>=1.24,<2.0
+pillow
+opencv-python-headless<4.10
+open3d
+trimesh
+fastapi
+uvicorn[standard]
+tqdm
+rembg[cpu]
+onnxruntime
+psutil
+httpx
+gunicorn
+python-multipart
+
+# TripoSR dependencies
+diffusers
+accelerate
+transformers
+supabase>=2.0.0

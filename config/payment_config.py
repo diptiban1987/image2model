@@ -129,7 +129,7 @@ class GumroadConfig:
     
     # Product IDs (create products in Gumroad dashboard)
     product_ids: Dict[str, str] = field(default_factory=lambda: {
-        "starter_monthly": "",  # Fill after creating product
+        "starter_monthly": "xeeeml",  # Fill after creating product
         "pro_monthly": "",
         "enterprise_monthly": "",
         "credits_small": "",
